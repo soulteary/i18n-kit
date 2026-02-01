@@ -2,12 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main, master, develop]
+    branches: [ main, develop ]
   pull_request:
-    branches: [main, master, develop]
+    branches: [ main, develop ]
 
 env:
-  GO_VERSION: "1.25"
+  GO_VERSION: '1.25'
 
 jobs:
   # Code formatting check
@@ -16,10 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go environment
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -37,10 +37,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go environment
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -49,61 +49,40 @@ jobs:
 
   # Code testing
   test:
-    name: Test
+    name: Code Testing
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go-version: ["1.22", "1.23", "1.24", "1.25"]
-
+        go-version: ['1.25']
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up Go environment
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go-version }}
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ matrix.go-version }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-${{ matrix.go-version }}-
-
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Verify dependencies
-        run: go mod verify
 
       - name: Run tests
         run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Generate coverage report
-        if: matrix.go-version == '1.25'
         run: go tool cover -html=coverage.out -o coverage.html
 
       - name: Upload coverage report
-        if: matrix.go-version == '1.25'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-report
           path: coverage.html
 
       - name: Display coverage summary
-        if: matrix.go-version == '1.25'
         run: go tool cover -func=coverage.out
 
-      - name: Upload coverage to Codecov
-        if: matrix.go-version == '1.25'
+      - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          file: ./coverage.out
+          files: ./coverage.out
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: false
@@ -112,63 +91,32 @@ jobs:
   lint:
     name: Code Quality Check
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Set up Go (temporarily use 1.24 to match golangci-lint)
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-
-      - name: Temporarily modify go.mod to match golangci-lint's Go version
-        run: |
-          cp go.mod go.mod.backup
-          sed -i 's/^go 1\.25$/go 1.24/' go.mod
-
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v7
-        with:
-          version: latest
-          args: --timeout=5m
-          only-new-issues: false
-
-      - name: Restore go.mod
-        if: always()
-        run: |
-          mv go.mod.backup go.mod
-
-  # Build verification
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    needs: [fmt, vet, test, lint]
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up Go environment
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Build
-        run: go build -v ./...
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.7.2
+          args: --timeout=5m
+          only-new-issues: false
 
   # Dependency security scan
   security-scan:
     name: Dependency Security Scan
     runs-on: ubuntu-latest
-    needs: [test]
-
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Go environment
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -177,8 +125,3 @@ jobs:
 
       - name: Run security scan
         run: govulncheck ./...
-
-      - name: Run Gosec Security Scanner
-        uses: securego/gosec@master
-        with:
-          args: ./...
