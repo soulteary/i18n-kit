@@ -1,7 +1,7 @@
 # i18n-kit
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit)
-[![Go Report Card](https://goreportcard.com/badge/github.com/soulteary/i18n-kit)](https://goreportcard.com/report/github.com/soulteary/i18n-kit)
+[![Go Report Card](.github/goreportcard.svg)](.github/goreportcard-report.md)
 [![CI](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/soulteary/i18n-kit/branch/main/graph/badge.svg)](https://codecov.io/gh/soulteary/i18n-kit)
 
