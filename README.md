@@ -1,6 +1,6 @@
 # i18n-kit
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit)
+[![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit/v2.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit/v2)
 [![Go Report Card](.github/goreportcard.svg)](.github/goreportcard-report.md)
 [![CI](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/soulteary/i18n-kit/branch/main/graph/badge.svg)](https://codecov.io/gh/soulteary/i18n-kit)
@@ -24,8 +24,10 @@ A lightweight, flexible internationalization (i18n) library for Go applications.
 ## Installation
 
 ```bash
-go get github.com/soulteary/i18n-kit
+go get github.com/soulteary/i18n-kit/v2
 ```
+
+Fiber integrations require Fiber v3.4.0 or later. Applications that still use Fiber v2 should remain on `github.com/soulteary/i18n-kit` v1.
 
 ## Quick Start
 
@@ -36,7 +38,7 @@ package main
 
 import (
     "fmt"
-    i18n "github.com/soulteary/i18n-kit"
+    i18n "github.com/soulteary/i18n-kit/v2"
 )
 
 func main() {
@@ -66,7 +68,7 @@ package main
 
 import (
     "net/http"
-    i18n "github.com/soulteary/i18n-kit"
+    i18n "github.com/soulteary/i18n-kit/v2"
 )
 
 func main() {
@@ -103,8 +105,8 @@ curl "http://localhost:8080/?lang=en"  # Output: Hello!
 package main
 
 import (
-    "github.com/gofiber/fiber/v2"
-    i18n "github.com/soulteary/i18n-kit"
+    "github.com/gofiber/fiber/v3"
+    i18n "github.com/soulteary/i18n-kit/v2"
 )
 
 func main() {
@@ -121,7 +123,7 @@ func main() {
     // Apply middleware
     app.Use(i18n.FiberMiddleware())
 
-    app.Get("/", func(c *fiber.Ctx) error {
+    app.Get("/", func(c fiber.Ctx) error {
         greeting := i18n.TFromFiber(c, "greeting")
         return c.SendString(greeting)
     })
@@ -272,7 +274,7 @@ config := i18n.MiddlewareConfig{
     CookieSecure:   true,
     CookieHTTPOnly: true,
     CookieSameSite: "Lax",
-    Next: func(c *fiber.Ctx) bool {        // Skip middleware
+    Next: func(c fiber.Ctx) bool {        // Skip middleware
         return c.Path() == "/health"
     },
 }
@@ -285,7 +287,7 @@ app.Use(i18n.FiberMiddleware(config))
 ```go
 // For Fiber
 config := i18n.MiddlewareConfig{
-    Next: func(c *fiber.Ctx) bool {
+    Next: func(c fiber.Ctx) bool {
         return c.Path() == "/api/internal"
     },
 }
