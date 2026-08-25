@@ -3,7 +3,7 @@ package i18n
 import (
 	"net/http"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // MiddlewareConfig configures the i18n middleware.
@@ -46,7 +46,7 @@ type MiddlewareConfig struct {
 
 	// Next defines a function to skip this middleware when true.
 	// Default: nil
-	Next func(c *fiber.Ctx) bool
+	Next func(c fiber.Ctx) bool
 
 	// NextStd defines a function to skip middleware for net/http when true.
 	// Default: nil
@@ -122,7 +122,7 @@ func FiberMiddleware(config ...MiddlewareConfig) fiber.Handler {
 		cfg = mergeConfig(cfg, config[0])
 	}
 
-	return func(c *fiber.Ctx) error {
+	return func(c fiber.Ctx) error {
 		// Skip middleware if Next returns true
 		if cfg.Next != nil && cfg.Next(c) {
 			return c.Next()
@@ -157,7 +157,7 @@ func FiberMiddleware(config ...MiddlewareConfig) fiber.Handler {
 }
 
 // LanguageFromFiberLocals extracts the language from Fiber locals.
-func LanguageFromFiberLocals(c *fiber.Ctx) Language {
+func LanguageFromFiberLocals(c fiber.Ctx) Language {
 	if lang, ok := c.Locals("i18n-language").(Language); ok {
 		return lang
 	}
@@ -165,7 +165,7 @@ func LanguageFromFiberLocals(c *fiber.Ctx) Language {
 }
 
 // BundleFromFiberLocals extracts the bundle from Fiber locals.
-func BundleFromFiberLocals(c *fiber.Ctx) *Bundle {
+func BundleFromFiberLocals(c fiber.Ctx) *Bundle {
 	if bundle, ok := c.Locals("i18n-bundle").(*Bundle); ok {
 		return bundle
 	}
@@ -173,14 +173,14 @@ func BundleFromFiberLocals(c *fiber.Ctx) *Bundle {
 }
 
 // TFromFiber returns the translated string using the language from Fiber context.
-func TFromFiber(c *fiber.Ctx, key string) string {
+func TFromFiber(c fiber.Ctx, key string) string {
 	bundle := BundleFromFiberLocals(c)
 	lang := LanguageFromFiberLocals(c)
 	return bundle.GetTranslation(lang, key)
 }
 
 // TfFromFiber returns a formatted translated string using the language from Fiber context.
-func TfFromFiber(c *fiber.Ctx, key string, args ...interface{}) string {
+func TfFromFiber(c fiber.Ctx, key string, args ...interface{}) string {
 	return TFromFiber(c, key)
 }
 

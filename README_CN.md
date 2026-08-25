@@ -1,7 +1,7 @@
 # i18n-kit
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit)
-[![Go Report Card](https://goreportcard.com/badge/github.com/soulteary/i18n-kit)](https://goreportcard.com/report/github.com/soulteary/i18n-kit)
+[![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit/v2.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit/v2)
+[![Go Report Card](https://goreportcard.com/badge/github.com/soulteary/i18n-kit/v2)](https://goreportcard.com/report/github.com/soulteary/i18n-kit/v2)
 [![CI](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/soulteary/i18n-kit/branch/main/graph/badge.svg)](https://codecov.io/gh/soulteary/i18n-kit)
 
@@ -24,8 +24,10 @@
 ## 安装
 
 ```bash
-go get github.com/soulteary/i18n-kit
+go get github.com/soulteary/i18n-kit/v2
 ```
+
+Fiber 集成要求 Fiber v3.4.0 或更高版本。仍使用 Fiber v2 的应用应继续使用 `github.com/soulteary/i18n-kit` v1。
 
 ## 快速开始
 
@@ -36,7 +38,7 @@ package main
 
 import (
     "fmt"
-    i18n "github.com/soulteary/i18n-kit"
+    i18n "github.com/soulteary/i18n-kit/v2"
 )
 
 func main() {
@@ -66,7 +68,7 @@ package main
 
 import (
     "net/http"
-    i18n "github.com/soulteary/i18n-kit"
+    i18n "github.com/soulteary/i18n-kit/v2"
 )
 
 func main() {
@@ -103,8 +105,8 @@ curl "http://localhost:8080/?lang=en"  # 输出: Hello!
 package main
 
 import (
-    "github.com/gofiber/fiber/v2"
-    i18n "github.com/soulteary/i18n-kit"
+    "github.com/gofiber/fiber/v3"
+    i18n "github.com/soulteary/i18n-kit/v2"
 )
 
 func main() {
@@ -121,7 +123,7 @@ func main() {
     // 应用中间件
     app.Use(i18n.FiberMiddleware())
 
-    app.Get("/", func(c *fiber.Ctx) error {
+    app.Get("/", func(c fiber.Ctx) error {
         greeting := i18n.TFromFiber(c, "greeting")
         return c.SendString(greeting)
     })
@@ -272,7 +274,7 @@ config := i18n.MiddlewareConfig{
     CookieSecure:   true,
     CookieHTTPOnly: true,
     CookieSameSite: "Lax",
-    Next: func(c *fiber.Ctx) bool {        // 跳过中间件
+    Next: func(c fiber.Ctx) bool {        // 跳过中间件
         return c.Path() == "/health"
     },
 }
@@ -285,7 +287,7 @@ app.Use(i18n.FiberMiddleware(config))
 ```go
 // Fiber
 config := i18n.MiddlewareConfig{
-    Next: func(c *fiber.Ctx) bool {
+    Next: func(c fiber.Ctx) bool {
         return c.Path() == "/api/internal"
     },
 }

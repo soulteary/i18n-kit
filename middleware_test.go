@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -196,7 +196,7 @@ func TestFiberMiddleware_Basic(t *testing.T) {
 
 	app.Use(FiberMiddleware())
 
-	app.Get("/", func(c *fiber.Ctx) error {
+	app.Get("/", func(c fiber.Ctx) error {
 		lang := LanguageFromFiberLocals(c)
 		return c.SendString(string(lang))
 	})
@@ -219,7 +219,7 @@ func TestFiberMiddleware_WithBundle(t *testing.T) {
 		Bundle: bundle,
 	}))
 
-	app.Get("/", func(c *fiber.Ctx) error {
+	app.Get("/", func(c fiber.Ctx) error {
 		b := BundleFromFiberLocals(c)
 		return c.SendString(b.GetTranslation(LangEN, "greeting"))
 	})
@@ -239,7 +239,7 @@ func TestFiberMiddleware_SetCookie(t *testing.T) {
 		SetCookie: true,
 	}))
 
-	app.Get("/", func(c *fiber.Ctx) error {
+	app.Get("/", func(c fiber.Ctx) error {
 		return c.SendString("ok")
 	})
 
@@ -265,17 +265,17 @@ func TestFiberMiddleware_Next(t *testing.T) {
 	app := fiber.New()
 
 	app.Use(FiberMiddleware(MiddlewareConfig{
-		Next: func(c *fiber.Ctx) bool {
+		Next: func(c fiber.Ctx) bool {
 			return c.Path() == "/skip"
 		},
 	}))
 
-	app.Get("/skip", func(c *fiber.Ctx) error {
+	app.Get("/skip", func(c fiber.Ctx) error {
 		lang := LanguageFromFiberLocals(c)
 		return c.SendString(string(lang))
 	})
 
-	app.Get("/normal", func(c *fiber.Ctx) error {
+	app.Get("/normal", func(c fiber.Ctx) error {
 		lang := LanguageFromFiberLocals(c)
 		return c.SendString(string(lang))
 	})
@@ -304,7 +304,7 @@ func TestTFromFiber(t *testing.T) {
 		Bundle: bundle,
 	}))
 
-	app.Get("/", func(c *fiber.Ctx) error {
+	app.Get("/", func(c fiber.Ctx) error {
 		return c.SendString(TFromFiber(c, "greeting"))
 	})
 
@@ -317,7 +317,7 @@ func TestTFromFiber(t *testing.T) {
 func TestLanguageFromFiberLocals_NoValue(t *testing.T) {
 	app := fiber.New()
 
-	app.Get("/", func(c *fiber.Ctx) error {
+	app.Get("/", func(c fiber.Ctx) error {
 		lang := LanguageFromFiberLocals(c)
 		return c.SendString(string(lang))
 	})
@@ -331,7 +331,7 @@ func TestLanguageFromFiberLocals_NoValue(t *testing.T) {
 func TestBundleFromFiberLocals_NoValue(t *testing.T) {
 	app := fiber.New()
 
-	app.Get("/", func(c *fiber.Ctx) error {
+	app.Get("/", func(c fiber.Ctx) error {
 		bundle := BundleFromFiberLocals(c)
 		if bundle == DefaultBundle {
 			return c.SendString("default")
@@ -350,7 +350,7 @@ func TestSimpleFiberMiddleware(t *testing.T) {
 
 	app.Use(SimpleFiberMiddleware())
 
-	app.Get("/", func(c *fiber.Ctx) error {
+	app.Get("/", func(c fiber.Ctx) error {
 		lang := LanguageFromFiberLocals(c)
 		return c.SendString(string(lang))
 	})

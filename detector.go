@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // DetectorConfig configures language detection behavior.
@@ -105,7 +105,7 @@ func (d *Detector) DetectFromRequest(r *http.Request) Language {
 }
 
 // DetectFromFiber detects language from a Fiber context.
-func (d *Detector) DetectFromFiber(c *fiber.Ctx) Language {
+func (d *Detector) DetectFromFiber(c fiber.Ctx) Language {
 	for _, method := range d.config.Priority {
 		var lang Language
 		var found bool
@@ -170,7 +170,7 @@ func (d *Detector) detectFromAcceptLanguageStd(r *http.Request) (Language, bool)
 
 // Fiber detection methods
 
-func (d *Detector) detectFromQueryFiber(c *fiber.Ctx) (Language, bool) {
+func (d *Detector) detectFromQueryFiber(c fiber.Ctx) (Language, bool) {
 	value := c.Query(d.config.QueryParam)
 	if value == "" {
 		return "", false
@@ -178,7 +178,7 @@ func (d *Detector) detectFromQueryFiber(c *fiber.Ctx) (Language, bool) {
 	return ParseLanguage(value)
 }
 
-func (d *Detector) detectFromCookieFiber(c *fiber.Ctx) (Language, bool) {
+func (d *Detector) detectFromCookieFiber(c fiber.Ctx) (Language, bool) {
 	value := c.Cookies(d.config.CookieName)
 	if value == "" {
 		return "", false
@@ -186,7 +186,7 @@ func (d *Detector) detectFromCookieFiber(c *fiber.Ctx) (Language, bool) {
 	return ParseLanguage(value)
 }
 
-func (d *Detector) detectFromHeaderFiber(c *fiber.Ctx) (Language, bool) {
+func (d *Detector) detectFromHeaderFiber(c fiber.Ctx) (Language, bool) {
 	value := c.Get(d.config.HeaderName)
 	if value == "" {
 		return "", false
@@ -194,7 +194,7 @@ func (d *Detector) detectFromHeaderFiber(c *fiber.Ctx) (Language, bool) {
 	return ParseLanguage(value)
 }
 
-func (d *Detector) detectFromAcceptLanguageFiber(c *fiber.Ctx) (Language, bool) {
+func (d *Detector) detectFromAcceptLanguageFiber(c fiber.Ctx) (Language, bool) {
 	header := c.Get("Accept-Language")
 	if header == "" {
 		return "", false
@@ -266,6 +266,6 @@ func DetectFromRequest(r *http.Request) Language {
 }
 
 // DetectFromFiber is a convenience function using the default detector.
-func DetectFromFiber(c *fiber.Ctx) Language {
+func DetectFromFiber(c fiber.Ctx) Language {
 	return DefaultDetector.DetectFromFiber(c)
 }
