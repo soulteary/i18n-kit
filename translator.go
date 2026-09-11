@@ -54,10 +54,36 @@ func (t *Translator) T(key string) string {
 	return t.bundle.GetTranslation(lang, key)
 }
 
+// formatTranslation applies args to a translation.
+//
+// A translation is used as a printf format string, and GetTranslation returns
+// the KEY when no translation exists. Handing that key to fmt.Sprintf with
+// arguments appends "%!(EXTRA string=...)": the arguments -- typically an
+// email address, phone number or user id -- end up inside the message shown to
+// whoever triggered it. A single missing translation therefore became an
+// information leak. When the key is missing, the key alone is returned.
+func formatTranslation(text string, found bool, args ...interface{}) string {
+	if !found {
+		return text
+	}
+	// A present translation is still formatted with no arguments, because it
+	// may carry printf escapes of its own: "Save 10%%" has always rendered as
+	// "Save 10%".
+	return fmt.Sprintf(text, args...)
+}
+
 // Tf returns a formatted translated string with arguments.
 // Uses the translator's current language.
+//
+// If the key has no translation, the key is returned as-is and the arguments
+// are NOT applied; see formatTranslation.
 func (t *Translator) Tf(key string, args ...interface{}) string {
-	return fmt.Sprintf(t.T(key), args...)
+	t.mu.RLock()
+	lang := t.lang
+	t.mu.RUnlock()
+
+	text, found := t.bundle.LookupTranslation(lang, key)
+	return formatTranslation(text, found, args...)
 }
 
 // TWithLang returns the translated string for a specific language.
@@ -66,8 +92,12 @@ func (t *Translator) TWithLang(lang Language, key string) string {
 }
 
 // TfWithLang returns a formatted translated string for a specific language.
+//
+// If the key has no translation, the key is returned as-is and the arguments
+// are NOT applied; see formatTranslation.
 func (t *Translator) TfWithLang(lang Language, key string, args ...interface{}) string {
-	return fmt.Sprintf(t.TWithLang(lang, key), args...)
+	text, found := t.bundle.LookupTranslation(lang, key)
+	return formatTranslation(text, found, args...)
 }
 
 // Bundle returns the underlying translation bundle.
@@ -108,9 +138,18 @@ func T(key string) string {
 	return DefaultBundle.GetTranslation(lang, key)
 }
 
-// Tf returns a formatted translated string using the global translator.
+// Tf returns a formatted translated string using the global language.
+//
+// This reads globalLang, the same setting T reads and SetGlobalLanguage
+// writes. It used to read GlobalTranslator's own language, which
+// SetGlobalLanguage never touches, so after SetGlobalLanguage(LangZH) T
+// returned Chinese while Tf returned the English fallback.
 func Tf(key string, args ...interface{}) string {
-	return fmt.Sprintf(T(key), args...)
+	globalLangMu.RLock()
+	lang := globalLang
+	globalLangMu.RUnlock()
+	text, found := DefaultBundle.LookupTranslation(lang, key)
+	return formatTranslation(text, found, args...)
 }
 
 // TWithLang returns the translated string for a specific language.
@@ -120,7 +159,8 @@ func TWithLang(lang Language, key string) string {
 
 // TfWithLang returns a formatted translated string for a specific language.
 func TfWithLang(lang Language, key string, args ...interface{}) string {
-	return fmt.Sprintf(TWithLang(lang, key), args...)
+	text, found := DefaultBundle.LookupTranslation(lang, key)
+	return formatTranslation(text, found, args...)
 }
 
 // AddTranslation adds a translation to the default bundle.

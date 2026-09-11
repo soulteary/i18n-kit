@@ -2,7 +2,6 @@ package i18n
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 )
 
@@ -59,8 +58,12 @@ func TFromContext(ctx context.Context, key string) string {
 }
 
 // TfFromContext returns a formatted translated string using the language from context.
+//
+// If the key has no translation, the key is returned as-is and the arguments
+// are NOT applied; see formatTranslation.
 func TfFromContext(ctx context.Context, key string, args ...interface{}) string {
-	return fmt.Sprintf(TFromContext(ctx, key), args...)
+	text, found := DefaultBundle.LookupTranslation(LanguageFromContext(ctx), key)
+	return formatTranslation(text, found, args...)
 }
 
 // TFromRequest returns the translated string using the language from request context.
@@ -70,8 +73,12 @@ func TFromRequest(r *http.Request, key string) string {
 }
 
 // TfFromRequest returns a formatted translated string using the language from request context.
+//
+// If the key has no translation, the key is returned as-is and the arguments
+// are NOT applied; see formatTranslation.
 func TfFromRequest(r *http.Request, key string, args ...interface{}) string {
-	return fmt.Sprintf(TFromRequest(r, key), args...)
+	text, found := DefaultBundle.LookupTranslation(LanguageFromRequest(r), key)
+	return formatTranslation(text, found, args...)
 }
 
 // BundleContextKey is the context key for storing a custom bundle.
@@ -102,6 +109,10 @@ func TFromContextWithBundle(ctx context.Context, key string) string {
 }
 
 // TfFromContextWithBundle returns a formatted translated string using the bundle and language from context.
+//
+// If the key has no translation, the key is returned as-is and the arguments
+// are NOT applied; see formatTranslation.
 func TfFromContextWithBundle(ctx context.Context, key string, args ...interface{}) string {
-	return fmt.Sprintf(TFromContextWithBundle(ctx, key), args...)
+	text, found := BundleFromContext(ctx).LookupTranslation(LanguageFromContext(ctx), key)
+	return formatTranslation(text, found, args...)
 }

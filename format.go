@@ -49,18 +49,29 @@ func (f *Formatter) FormatWithContext(ctx interface{}, key string, params map[st
 }
 
 // substituteParams replaces {name} placeholders with values from the map.
+//
+// Substitution is a SINGLE pass over the template, so a substituted value is
+// never rescanned. Replacing one parameter at a time with strings.ReplaceAll,
+// as this used to, had two consequences: a value containing "{other}" got
+// substituted again on a later iteration (placeholder injection), and because
+// Go randomises map iteration order, whether that happened varied from run to
+// run on identical input.
+//
+// A placeholder with no matching parameter is left in place, so a missing
+// value is visible rather than silently blank.
 func substituteParams(template string, params map[string]interface{}) string {
 	if len(params) == 0 {
 		return template
 	}
 
-	result := template
-	for name, value := range params {
-		placeholder := "{" + name + "}"
-		replacement := fmt.Sprintf("%v", value)
-		result = strings.ReplaceAll(result, placeholder, replacement)
-	}
-	return result
+	return TemplatePattern.ReplaceAllStringFunc(template, func(match string) string {
+		name := strings.TrimSuffix(strings.TrimPrefix(match, "{"), "}")
+		value, ok := params[name]
+		if !ok {
+			return match
+		}
+		return fmt.Sprintf("%v", value)
+	})
 }
 
 // PluralizationRule defines a rule for plural forms.
@@ -129,7 +140,16 @@ func Pluralize(lang Language, key string, count int, params map[string]interface
 }
 
 // TemplatePattern matches {variable} patterns.
-var TemplatePattern = regexp.MustCompile(`\{([^}]+)\}`)
+//
+// The character class excludes "{" as well as "}", so a literal opening brace
+// cannot be swallowed into a placeholder. With `[^}]+` the pattern applied to
+//
+//	{"message":"Hello {name}"}
+//
+// started at the JSON brace, ran through the placeholder's closing brace, and
+// looked up the nonexistent parameter `"message":"Hello {name` -- leaving the
+// real {name} unsubstituted.
+var TemplatePattern = regexp.MustCompile(`\{([^{}]+)\}`)
 
 // ExtractParams extracts parameter names from a translation template.
 func ExtractParams(template string) []string {
