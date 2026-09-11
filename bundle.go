@@ -71,6 +71,35 @@ func (b *Bundle) AddTranslations(lang Language, translations map[string]string) 
 // GetTranslation retrieves a translation for the given language and key.
 // It falls back to the fallback language if not found.
 // Returns the key itself if no translation exists.
+// LookupTranslation is GetTranslation with an explicit found flag.
+//
+// GetTranslation returns the key itself when nothing is found, which is a fine
+// fallback for display but indistinguishable from a translation that happens
+// to equal its key -- and callers that then use the result as a format string
+// need to know the difference. See Translator.Tf.
+func (b *Bundle) LookupTranslation(lang Language, key string) (string, bool) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	// Try the requested language
+	if langMap, ok := b.translations[lang]; ok {
+		if translation, ok := langMap[key]; ok {
+			return translation, true
+		}
+	}
+
+	// Try fallback language
+	if lang != b.fallback {
+		if langMap, ok := b.translations[b.fallback]; ok {
+			if translation, ok := langMap[key]; ok {
+				return translation, true
+			}
+		}
+	}
+
+	return key, false
+}
+
 func (b *Bundle) GetTranslation(lang Language, key string) string {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
