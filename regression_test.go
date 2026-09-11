@@ -92,3 +92,57 @@ func TestLookupTranslationReportsMissing(t *testing.T) {
 		t.Errorf("LookupTranslation(absent) = (%q, %v), want (\"absent\", false)", text, found)
 	}
 }
+
+// --- Codex review follow-ups (PR #3) ---
+
+// TestPackageTfFollowsSetGlobalLanguage is the regression test for package-level
+// Tf reading GlobalTranslator's own language instead of globalLang. T reads
+// globalLang and SetGlobalLanguage writes it, so after switching to Chinese, T
+// returned Chinese while Tf silently fell back to English.
+func TestPackageTfFollowsSetGlobalLanguage(t *testing.T) {
+	const key = "codex.greeting"
+	AddTranslation(LangEN, key, "Hello %s")
+	AddTranslation(LangZH, key, "你好 %s")
+	t.Cleanup(func() { SetGlobalLanguage(LangEN) })
+
+	SetGlobalLanguage(LangZH)
+
+	if got, want := T(key), "你好 %s"; got != want {
+		t.Fatalf("T(%q) = %q, want %q", key, got, want)
+	}
+	if got, want := Tf(key, "世界"), "你好 世界"; got != want {
+		t.Errorf("Tf(%q) = %q, want %q -- Tf must follow SetGlobalLanguage the way T does", key, got, want)
+	}
+
+	SetGlobalLanguage(LangEN)
+	if got, want := Tf(key, "world"), "Hello world"; got != want {
+		t.Errorf("Tf(%q) after switching back = %q, want %q", key, got, want)
+	}
+}
+
+// TestPresentTranslationIsStillFormattedWithoutArgs: skipping fmt.Sprintf
+// whenever the argument list was empty changed established output for
+// translations carrying their own printf escapes. Only a MISSING translation
+// may skip formatting -- that is what keeps arguments out of the message.
+func TestPresentTranslationIsStillFormattedWithoutArgs(t *testing.T) {
+	const key = "codex.discount"
+	AddTranslation(LangEN, key, "Save 10%%")
+	t.Cleanup(func() { SetGlobalLanguage(LangEN) })
+	SetGlobalLanguage(LangEN)
+
+	if got, want := Tf(key), "Save 10%"; got != want {
+		t.Errorf("Tf(%q) = %q, want %q -- a present translation must still be formatted", key, got, want)
+	}
+	if got, want := TfWithLang(LangEN, key), "Save 10%"; got != want {
+		t.Errorf("TfWithLang(%q) = %q, want %q", key, got, want)
+	}
+	if got, want := NewTranslatorWithLanguage(DefaultBundle, LangEN).Tf(key), "Save 10%"; got != want {
+		t.Errorf("Translator.Tf(%q) = %q, want %q", key, got, want)
+	}
+
+	// The leak guard still holds: a missing key is returned bare.
+	const missing = "codex.no.such.key"
+	if got := Tf(missing, "user@example.com"); got != missing {
+		t.Errorf("Tf(missing) = %q, want the bare key %q", got, missing)
+	}
+}

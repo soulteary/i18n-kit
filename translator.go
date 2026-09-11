@@ -63,9 +63,12 @@ func (t *Translator) T(key string) string {
 // whoever triggered it. A single missing translation therefore became an
 // information leak. When the key is missing, the key alone is returned.
 func formatTranslation(text string, found bool, args ...interface{}) string {
-	if !found || len(args) == 0 {
+	if !found {
 		return text
 	}
+	// A present translation is still formatted with no arguments, because it
+	// may carry printf escapes of its own: "Save 10%%" has always rendered as
+	// "Save 10%".
 	return fmt.Sprintf(text, args...)
 }
 
@@ -135,9 +138,17 @@ func T(key string) string {
 	return DefaultBundle.GetTranslation(lang, key)
 }
 
-// Tf returns a formatted translated string using the global translator.
+// Tf returns a formatted translated string using the global language.
+//
+// This reads globalLang, the same setting T reads and SetGlobalLanguage
+// writes. It used to read GlobalTranslator's own language, which
+// SetGlobalLanguage never touches, so after SetGlobalLanguage(LangZH) T
+// returned Chinese while Tf returned the English fallback.
 func Tf(key string, args ...interface{}) string {
-	text, found := DefaultBundle.LookupTranslation(GlobalTranslator.GetLanguage(), key)
+	globalLangMu.RLock()
+	lang := globalLang
+	globalLangMu.RUnlock()
+	text, found := DefaultBundle.LookupTranslation(lang, key)
 	return formatTranslation(text, found, args...)
 }
 
