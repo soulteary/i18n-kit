@@ -146,3 +146,29 @@ func TestPresentTranslationIsStillFormattedWithoutArgs(t *testing.T) {
 		t.Errorf("Tf(missing) = %q, want the bare key %q", got, missing)
 	}
 }
+
+// --- Codex review round 2 (PR #3) ---
+
+// TestSubstitutionSurvivesLiteralBraces is the regression test for the
+// single-pass rewrite's pattern. `\{([^}]+)\}` starts at the first "{" and
+// runs to the first "}", so a literal opening brace before a placeholder
+// swallowed it whole and the real placeholder was left unsubstituted.
+func TestSubstitutionSurvivesLiteralBraces(t *testing.T) {
+	cases := []struct {
+		in     string
+		params map[string]interface{}
+		want   string
+	}{
+		{`{"message":"Hello {name}"}`, map[string]interface{}{"name": "Alice"}, `{"message":"Hello Alice"}`},
+		{`Hello {name}`, map[string]interface{}{"name": "Alice"}, `Hello Alice`},
+		{`{{name}}`, map[string]interface{}{"name": "Alice"}, `{Alice}`},
+		{`a {b} c {d} e`, map[string]interface{}{"b": "1", "d": "2"}, `a 1 c 2 e`},
+		// An unknown placeholder is still left alone.
+		{`Hello {who}`, map[string]interface{}{"name": "Alice"}, `Hello {who}`},
+	}
+	for _, tc := range cases {
+		if got := substituteParams(tc.in, tc.params); got != tc.want {
+			t.Errorf("SubstituteParams(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

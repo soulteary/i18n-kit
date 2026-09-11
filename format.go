@@ -140,7 +140,16 @@ func Pluralize(lang Language, key string, count int, params map[string]interface
 }
 
 // TemplatePattern matches {variable} patterns.
-var TemplatePattern = regexp.MustCompile(`\{([^}]+)\}`)
+//
+// The character class excludes "{" as well as "}", so a literal opening brace
+// cannot be swallowed into a placeholder. With `[^}]+` the pattern applied to
+//
+//	{"message":"Hello {name}"}
+//
+// started at the JSON brace, ran through the placeholder's closing brace, and
+// looked up the nonexistent parameter `"message":"Hello {name` -- leaving the
+// real {name} unsubstituted.
+var TemplatePattern = regexp.MustCompile(`\{([^{}]+)\}`)
 
 // ExtractParams extracts parameter names from a translation template.
 func ExtractParams(template string) []string {
