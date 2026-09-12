@@ -4,6 +4,7 @@
 [![Go Report Card](.github/goreportcard.svg)](.github/goreportcard-report.md)
 [![CI](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/soulteary/i18n-kit/branch/main/graph/badge.svg)](https://codecov.io/gh/soulteary/i18n-kit)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 一个轻量级、灵活的 Go 国际化 (i18n) 库。支持从 HTTP 请求自动检测语言、翻译包管理，以及 Fiber 和 net/http 双框架中间件。
 
@@ -20,6 +21,14 @@
 - **复数形式**：简单的复数形式处理
 - **文件加载**：从 JSON 或 YAML 文件加载翻译
 - **零依赖**：仅 Fiber 中间件可选依赖
+
+## 环境要求
+
+- **Go 1.27+**（`go.mod` 声明 `go 1.27.0`）
+- Fiber 中间件需要 `github.com/gofiber/fiber/v3` v3.4.0+
+
+v2 模块线面向 Fiber v3。仍在 Fiber v2 上的应用请继续使用
+`github.com/soulteary/i18n-kit` v1。
 
 ## 安装
 
@@ -187,6 +196,34 @@ bundle.LoadYAMLFile(i18n.LangZH, "locales/zh.yaml")
 bundle.LoadDirectory("locales/")
 ```
 
+### 管理翻译包
+
+```go
+bundle.HasTranslation(i18n.LangEN, "welcome")
+bundle.GetTranslation(i18n.LangEN, "welcome")      // 缺失时返回 key 本身
+bundle.LookupTranslation(i18n.LangEN, "welcome")   // (value, found)
+bundle.Keys(i18n.LangEN)                           // 某语言的所有 key
+bundle.Languages()                                 // 所有已有译文的语言
+bundle.GetFallback()
+bundle.SetFallback(i18n.LangEN)
+
+bundle.Merge(other)          // 把另一个 bundle 的译文并进来
+clone := bundle.Clone()      // 独立副本
+bundle.ClearLanguage(i18n.LangFR)
+bundle.Clear()
+```
+
+### 全局语言
+
+包级的 `T`/`Tf` 读取一个进程级的语言设置：
+
+```go
+i18n.SetGlobalLanguage(i18n.LangZH)
+lang := i18n.GetGlobalLanguage()
+```
+
+在服务端请优先使用请求级和上下文级的变体；全局变量是被所有并发请求共享的单一值。
+
 ### 翻译回退
 
 当请求的语言中找不到翻译时，会回退到默认语言：
@@ -206,17 +243,87 @@ result = bundle.GetTranslation(i18n.LangEN, "unknown.key")
 
 ## 命名参数
 
-使用 `{name}` 风格的占位符进行参数替换：
+使用 `{name}` 形式的占位符，并传入一个 map：
 
 ```go
 bundle.AddTranslation(i18n.LangEN, "welcome", "Welcome, {name}! You have {count} messages.")
 
 formatter := i18n.NewFormatter(bundle)
-result := formatter.Format(i18n.LangEN, "welcome", map[string]interface{}{
+result := formatter.Format(i18n.LangEN, "welcome", map[string]any{
     "name":  "Alice",
     "count": 5,
 })
-// result == "Welcome, Alice! You have 5 messages."
+// "Welcome, Alice! You have 5 messages."
+
+// 也可以用包级函数，作用于 DefaultBundle
+result = i18n.Format(i18n.LangEN, "welcome", map[string]any{"name": "Alice", "count": 5})
+```
+
+替换过程是**对模板的单次遍历**，由此得到两个可以依赖的保证：
+
+- **已替换进去的值不会被再次扫描。** 如果 `name` 的值是 `"{count}"`，输出里它就保持
+  `"{count}"`，不会被再替换一轮。
+- **结果不依赖 map 的遍历顺序。** Go 会随机化遍历顺序，所以此前"值里含有另一个占位符"
+  的情况，在完全相同的输入上每次运行可能产出不同结果。
+
+没有对应参数的占位符会**原样保留**，不会被清空——输出里看得见的 `{name}` 说明缺了一个
+参数，这比留下空字符串更容易被发现、也更容易写断言。占位符外层的字面花括号会被保留：
+`{"message":"Hello {name}"}` 里的 `Hello {name}` 仍能正确替换。
+
+格式化之前可以先检查模板：
+
+```go
+params := i18n.ExtractParams("Welcome, {name}!")         // ["name"]
+has := i18n.HasParams("Welcome, {name}!")                // true
+missing := i18n.ValidateParams(tmpl, providedParams)      // 没有取到值的参数名
+```
+
+`i18n.TemplatePattern` 是编译好的占位符正则，供需要自己匹配的调用方使用。
+
+## printf 风格格式化
+
+`Tf` 及其变体把译文当作 `fmt.Sprintf` 的格式串：
+
+```go
+bundle.AddTranslation(i18n.LangEN, "greeting", "Hello, %s! You are %d.")
+
+translator := i18n.NewTranslator(bundle)
+translator.Tf("greeting", "Alice", 30)                  // "Hello, Alice! You are 30."
+translator.TfWithLang(i18n.LangZH, "greeting", "Alice", 30)
+
+// 包级函数，作用于 GlobalTranslator / DefaultBundle
+i18n.Tf("greeting", "Alice", 30)
+i18n.TfWithLang(i18n.LangZH, "greeting", "Alice", 30)
+
+// 请求级与上下文级
+i18n.TfFromRequest(r, "greeting", "Alice", 30)
+i18n.TfFromContext(ctx, "greeting", "Alice", 30)
+i18n.TfFromContextWithBundle(ctx, "greeting", "Alice", 30)
+i18n.TfFromFiber(c, "greeting", "Alice", 30)
+```
+
+**译文缺失时返回未格式化的 key，并丢弃参数。** 这一点很重要，否则缺失的 key 会被当作
+格式串使用：
+
+```go
+// key 在任何 bundle 里都不存在：
+i18n.Tf("error.account_locked", "user@example.com")
+// 返回 "error.account_locked"
+// 而不是 "error.account_locked%!(EXTRA string=user@example.com)"
+```
+
+这类调用的参数通常是邮箱地址、手机号或用户 ID，而那个 `%!(EXTRA …)` 后缀会把它们塞进
+展示给触发该错误的人看的消息里。
+
+**存在**的译文始终会经过 `fmt.Sprintf`，即便没有参数，这样它自带的 printf 转义才能
+正常渲染：`"Save 10%%"` 会变成 `"Save 10%"`。
+
+需要区分这两种情况时，请用 `Bundle.LookupTranslation`：
+
+```go
+if value, ok := bundle.LookupTranslation(i18n.LangEN, key); ok {
+    // 这是一条真正的译文
+}
 ```
 
 ## 复数形式
@@ -233,7 +340,16 @@ formatter := i18n.NewFormatter(bundle)
 formatter.Pluralize(i18n.LangEN, "items", 0, nil)  // "No items"
 formatter.Pluralize(i18n.LangEN, "items", 1, nil)  // "One item"
 formatter.Pluralize(i18n.LangEN, "items", 5, nil)  // "5 items"
+
+// 包级函数，作用于 DefaultBundle
+i18n.Pluralize(i18n.LangEN, "items", 5, nil)
+
+// 只有单复数两种形态时不需要 bundle
+i18n.PluralizeSimple(5, "item", "items") // "items"
 ```
+
+key 按 `<key>.zero`、`.one`、`.few`、`.many`、`.other` 查找，与
+`i18n.PluralizationRule` 的字段一一对应。额外的命名参数会照常替换，`{count}` 始终可用。
 
 ## 上下文集成
 
@@ -317,6 +433,15 @@ config := i18n.MiddlewareConfig{
 | 葡萄牙语 | `pt` | pt-PT, pt-BR |
 | 俄语 | `ru` | ru-RU |
 
+### 处理语言代码
+
+```go
+lang := i18n.NormalizeLanguage("en-US")        // "en"
+lang, ok := i18n.ParseLanguage("zh-Hans")      // ("zh", true)
+i18n.LangEN.IsValid()                          // true
+i18n.LangEN.String()                           // "en"
+```
+
 ### 添加自定义语言
 
 ```go
@@ -335,6 +460,32 @@ i18n.AddLanguageAlias("ar-EG", i18n.Language("ar"))
 - `Translator`：支持并发使用
 - 全局函数：使用互斥锁保护
 
+## 升级说明（v2.2.0）
+
+新增一个方法，没有删除任何东西。有两处行为会改变输出。
+
+- **译文缺失时，`Tf` 的参数不再泄露进消息。** `Tf` 此前把译文当作 printf 格式串，而
+  `GetTranslation` 在没有译文时返回的是 *key*——于是当 key 缺失时，
+  `Tf("error.account_locked", userEmail)` 会产出
+  `error.account_locked%!(EXTRA string=user@example.com)`，把邮箱地址摆在触发该错误的
+  人面前。现在所有 `Tf` 变体在找不到译文时都返回未格式化的 key。**如果你对那段
+  `%!(EXTRA …)` 输出写过断言，这些断言需要改。**
+- **参数替换改为单次遍历。** 此前是用 `strings.ReplaceAll` 一个参数一个参数地替换，
+  会重新扫描已经替换进去的值——于是"值里含有另一个参数占位符"的情况会被再替换一次，
+  而由于 Go 随机化 map 遍历顺序，*在完全相同的输入上，这件事会不会发生每次运行都可能
+  不同*。现在已替换的值绝不会被再次扫描。
+- **未匹配的占位符会原样保留**，而不是被默默清空，这样缺参数在输出里看得见。
+- **字面花括号不再吞掉紧随其后的占位符。** `{"message":"Hello {name}"}` 此前会去查一个
+  并不存在的参数 `"message":"Hello {name`，并让真正的 `{name}` 没被替换。
+- **包级 `Tf` 会跟随 `SetGlobalLanguage`。** 它此前读的是
+  `GlobalTranslator.GetLanguage()`，而 `SetGlobalLanguage` 从不写这个值，`T` 读的却是
+  全局变量。于是 `SetGlobalLanguage(LangZH)` 之后，`T` 返回中文而 `Tf` 静默返回英文
+  回退文本。
+- **存在的译文始终会被格式化**，即便没有参数，这样它自带的 printf 转义才能渲染——
+  `"Save 10%%"` 又是 `"Save 10%"` 了。只有*缺失*的译文会跳过格式化。
+- **新增 `Bundle.LookupTranslation(lang, key) (string, bool)`**，供需要区分"真正的
+  译文"和"返回的 key"的调用方使用。
+
 ## 最佳实践
 
 1. **每个应用使用一个 Bundle**：创建一个翻译包并复用
@@ -343,6 +494,16 @@ i18n.AddLanguageAlias("ar-EG", i18n.Language("ar"))
 4. **设置回退语言**：始终配置缺失翻译的回退
 5. **使用有意义的键名**：使用点号分隔，如 `error.not_found`、`page.home.title`
 
+## 测试
+
+```bash
+go test ./...
+
+# 带覆盖率
+go test ./... -coverprofile=coverage.out -covermode=atomic
+go tool cover -func=coverage.out
+```
+
 ## 许可证
 
-Apache License 2.0
+Apache License 2.0 —— 详见 [LICENSE](LICENSE)。
