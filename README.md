@@ -4,6 +4,9 @@
 [![Go Report Card](.github/goreportcard.svg)](.github/goreportcard-report.md)
 [![CI](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/soulteary/i18n-kit/branch/main/graph/badge.svg)](https://codecov.io/gh/soulteary/i18n-kit)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
+[中文文档](README_CN.md)
 
 A lightweight, flexible internationalization (i18n) library for Go applications. Supports language detection from HTTP requests, translation bundles, and middleware for both Fiber and net/http.
 
@@ -20,6 +23,14 @@ A lightweight, flexible internationalization (i18n) library for Go applications.
 - **Pluralization**: Simple plural form handling
 - **File Loading**: Load translations from JSON or YAML files
 - **Zero Dependencies**: Only depends on Fiber for middleware (optional)
+
+## Requirements
+
+- **Go 1.27+** (`go.mod` declares `go 1.27.0`)
+- `github.com/gofiber/fiber/v3` v3.4.0+ for the Fiber middleware
+
+This v2 module line targets Fiber v3. Applications still on Fiber v2 should
+remain on `github.com/soulteary/i18n-kit` v1.
 
 ## Installation
 
@@ -187,6 +198,35 @@ bundle.LoadYAMLFile(i18n.LangZH, "locales/zh.yaml")
 bundle.LoadDirectory("locales/")
 ```
 
+### Managing a Bundle
+
+```go
+bundle.HasTranslation(i18n.LangEN, "welcome")
+bundle.GetTranslation(i18n.LangEN, "welcome")      // returns the key when missing
+bundle.LookupTranslation(i18n.LangEN, "welcome")   // (value, found)
+bundle.Keys(i18n.LangEN)                           // every key for a language
+bundle.Languages()                                 // every language with translations
+bundle.GetFallback()
+bundle.SetFallback(i18n.LangEN)
+
+bundle.Merge(other)          // copy another bundle's translations in
+clone := bundle.Clone()      // independent copy
+bundle.ClearLanguage(i18n.LangFR)
+bundle.Clear()
+```
+
+### Global Language
+
+The package-level `T`/`Tf` read a process-wide language:
+
+```go
+i18n.SetGlobalLanguage(i18n.LangZH)
+lang := i18n.GetGlobalLanguage()
+```
+
+Prefer the request- and context-scoped variants in a server; a global is a
+single value shared by every concurrent request.
+
 ### Translation Fallback
 
 When a translation is not found in the requested language, it falls back to the bundle's default language:
@@ -206,17 +246,95 @@ result = bundle.GetTranslation(i18n.LangEN, "unknown.key")
 
 ## Named Parameters
 
-Use `{name}` style placeholders for parameter substitution:
+Use `{name}` placeholders and pass a map:
 
 ```go
 bundle.AddTranslation(i18n.LangEN, "welcome", "Welcome, {name}! You have {count} messages.")
 
 formatter := i18n.NewFormatter(bundle)
-result := formatter.Format(i18n.LangEN, "welcome", map[string]interface{}{
+result := formatter.Format(i18n.LangEN, "welcome", map[string]any{
     "name":  "Alice",
     "count": 5,
 })
-// result == "Welcome, Alice! You have 5 messages."
+// "Welcome, Alice! You have 5 messages."
+
+// Or package-level, against DefaultBundle
+result = i18n.Format(i18n.LangEN, "welcome", map[string]any{"name": "Alice", "count": 5})
+```
+
+Substitution is a **single pass over the template**, which gives two guarantees
+worth relying on:
+
+- **A substituted value is never rescanned.** If `name` is `"{count}"`, it stays
+  `"{count}"` in the output rather than being substituted again.
+- **The result does not depend on map iteration order.** Go randomises that, so a
+  value containing another placeholder used to produce different output on
+  identical input between runs.
+
+A placeholder with no matching parameter is **left in place**, not blanked — a
+visible `{name}` in the output is a missing parameter, which is easier to notice
+and to test for than an empty string. Literal braces around a placeholder are
+preserved: `Hello {name}` inside `{"message":"Hello {name}"}` still substitutes
+correctly.
+
+Inspect a template before formatting:
+
+```go
+params := i18n.ExtractParams("Welcome, {name}!")         // ["name"]
+has := i18n.HasParams("Welcome, {name}!")                // true
+missing := i18n.ValidateParams(tmpl, providedParams)      // names with no value
+```
+
+`i18n.TemplatePattern` is the compiled placeholder regexp, exported for callers
+that need to match it themselves.
+
+## Printf-style Formatting
+
+`Tf` and its variants treat the translation as a `fmt.Sprintf` format string:
+
+```go
+bundle.AddTranslation(i18n.LangEN, "greeting", "Hello, %s! You are %d.")
+
+translator := i18n.NewTranslator(bundle)
+translator.Tf("greeting", "Alice", 30)                  // "Hello, Alice! You are 30."
+translator.TfWithLang(i18n.LangZH, "greeting", "Alice", 30)
+
+// Package-level, against GlobalTranslator / DefaultBundle
+i18n.Tf("greeting", "Alice", 30)
+i18n.TfWithLang(i18n.LangZH, "greeting", "Alice", 30)
+
+// Request- and context-scoped
+i18n.TfFromRequest(r, "greeting", "Alice", 30)
+i18n.TfFromContext(ctx, "greeting", "Alice", 30)
+i18n.TfFromContextWithBundle(ctx, "greeting", "Alice", 30)
+i18n.TfFromFiber(c, "greeting", "Alice", 30)
+```
+
+**When the translation is missing, the key is returned unformatted and the
+arguments are discarded.** That matters because a missing key would otherwise be
+used as the format string:
+
+```go
+// Key not present in any bundle:
+i18n.Tf("error.account_locked", "user@example.com")
+// returns "error.account_locked"
+// NOT "error.account_locked%!(EXTRA string=user@example.com)"
+```
+
+Arguments to these calls are typically an email address, a phone number or a user
+id, so that `%!(EXTRA …)` suffix put them inside the message shown to whoever
+triggered the error.
+
+A translation that **is** present is always passed through `fmt.Sprintf`, even
+with no arguments, so its own printf escapes render: `"Save 10%%"` becomes
+`"Save 10%"`.
+
+Use `Bundle.LookupTranslation` when you need to know which case you are in:
+
+```go
+if value, ok := bundle.LookupTranslation(i18n.LangEN, key); ok {
+    // a real translation
+}
 ```
 
 ## Pluralization
@@ -233,7 +351,17 @@ formatter := i18n.NewFormatter(bundle)
 formatter.Pluralize(i18n.LangEN, "items", 0, nil)  // "No items"
 formatter.Pluralize(i18n.LangEN, "items", 1, nil)  // "One item"
 formatter.Pluralize(i18n.LangEN, "items", 5, nil)  // "5 items"
+
+// Package-level, against DefaultBundle
+i18n.Pluralize(i18n.LangEN, "items", 5, nil)
+
+// No bundle needed for the two-form case
+i18n.PluralizeSimple(5, "item", "items") // "items"
 ```
+
+Keys are looked up as `<key>.zero`, `.one`, `.few`, `.many`, `.other`, matching
+the fields of `i18n.PluralizationRule`. Extra named parameters are substituted as
+usual, and `{count}` is always available.
 
 ## Context Integration
 
@@ -317,6 +445,15 @@ Built-in language codes and their common variants:
 | Portuguese | `pt` | pt-PT, pt-BR |
 | Russian | `ru` | ru-RU |
 
+### Working with Language Codes
+
+```go
+lang := i18n.NormalizeLanguage("en-US")        // "en"
+lang, ok := i18n.ParseLanguage("zh-Hans")      // ("zh", true)
+i18n.LangEN.IsValid()                          // true
+i18n.LangEN.String()                           // "en"
+```
+
 ### Adding Custom Languages
 
 ```go
@@ -335,6 +472,38 @@ All components are thread-safe:
 - `Translator`: Safe for concurrent use
 - Global functions: Protected by mutex
 
+## Upgrade Notes (v2.2.0)
+
+One method was added; nothing was removed. Two behaviours change output.
+
+- **A missing translation no longer leaks `Tf` arguments into the message.**
+  `Tf` used the translation as a printf format string, and `GetTranslation`
+  returns the *key* when no translation exists — so
+  `Tf("error.account_locked", userEmail)` with that key missing produced
+  `error.account_locked%!(EXTRA string=user@example.com)`, putting the email
+  address in front of whoever triggered the error. Every `Tf` variant now returns
+  the key unformatted when the translation was not found. **If you asserted on
+  that `%!(EXTRA …)` output, those assertions change.**
+- **Parameter substitution is a single pass.** It substituted one parameter at a
+  time with `strings.ReplaceAll`, rescanning values it had already substituted —
+  so a value containing another parameter's placeholder got substituted again,
+  and because Go randomises map iteration order, *whether that happened varied
+  between runs on identical input*. A substituted value is never rescanned now.
+- **An unmatched placeholder is left in place** rather than silently blanked, so
+  a missing parameter is visible in the output.
+- **Literal braces no longer swallow a following placeholder.**
+  `{"message":"Hello {name}"}` used to look up the nonexistent parameter
+  `"message":"Hello {name` and leave the real `{name}` unsubstituted.
+- **Package-level `Tf` follows `SetGlobalLanguage`.** It read
+  `GlobalTranslator.GetLanguage()`, which `SetGlobalLanguage` never writes, while
+  `T` read the global. After `SetGlobalLanguage(LangZH)`, `T` returned Chinese and
+  `Tf` silently returned the English fallback.
+- **A present translation is always formatted**, even with no arguments, so its
+  own printf escapes render — `"Save 10%%"` is `"Save 10%"` again. Only a
+  *missing* translation skips formatting.
+- **`Bundle.LookupTranslation(lang, key) (string, bool)` is new**, for callers
+  that need to tell a translation from a returned key.
+
 ## Best Practices
 
 1. **Use a single Bundle per application**: Create one bundle and reuse it
@@ -342,7 +511,22 @@ All components are thread-safe:
 3. **Use context-based translations**: Prefer `TFromRequest`/`TFromContext` over global `T`
 4. **Set fallback language**: Always configure a fallback for missing translations
 5. **Use meaningful keys**: Use dot-notation like `error.not_found`, `page.home.title`
+6. **Prefer named parameters over `Tf` for user-facing text**: `{name}` placeholders
+   cannot consume arguments the way a printf format string can, and an unmatched
+   one is visible rather than silent
+7. **Check `LookupTranslation` in tests**: a key returned where a sentence was
+   expected is the signal that a translation is missing
+
+## Testing
+
+```bash
+go test ./...
+
+# With coverage
+go test ./... -coverprofile=coverage.out -covermode=atomic
+go tool cover -func=coverage.out
+```
 
 ## License
 
-Apache License 2.0
+Apache License 2.0 — see [LICENSE](LICENSE) for details.
