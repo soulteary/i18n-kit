@@ -17,8 +17,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	i18n "github.com/soulteary/i18n-kit/v2"
-	"github.com/soulteary/i18n-kit/v2/fiberadapter"
+	i18n "github.com/soulteary/i18n-kit/v3"
+	"github.com/soulteary/i18n-kit/v3/fiberadapter"
 )
 
 // shape mutates a fresh GET / request; each case is applied to both stacks.

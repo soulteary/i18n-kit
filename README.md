@@ -1,6 +1,6 @@
 # i18n-kit
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit/v2.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit/v2)
+[![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit/v3.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit/v3)
 [![Go Report Card](.github/goreportcard.svg)](.github/goreportcard-report.md)
 [![CI](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/soulteary/i18n-kit/branch/main/graph/badge.svg)](https://codecov.io/gh/soulteary/i18n-kit)
@@ -13,11 +13,18 @@ A lightweight, flexible internationalization (i18n) library for Go applications.
 [中文文档](README_CN.md)
 
 
-> **Breaking in v2.3.0 — Fiber support moved to a subpackage.**
-> The Fiber entry points are now `github.com/soulteary/i18n-kit/v2/fiberadapter`,
+> **v3.0.0 — Fiber support moved to a subpackage, and the module is now `/v3`.**
+> The Fiber entry points are now `github.com/soulteary/i18n-kit/v3/fiberadapter`,
 > so importing the root package no longer links Fiber (and fasthttp) into
 > binaries that never use it. In a net/http service that means **25 fewer
-> linked packages, 10 fewer modules and a 25% smaller binary**.
+> linked packages, a go.sum shrinking from 48 lines to 8, and a 25% smaller
+> binary** (8080 KB → 6100 KB, measured on a program that only calls
+> `StdMiddleware` and `T()`).
+>
+> This removes exported API from the root package, so it goes out as a new
+> major version rather than a v2 minor: **v2.2.0 keeps working untouched**, and
+> upgrading is a deliberate edit of your import path, never something
+> `go get -u` does to you.
 >
 > | Before | After |
 > |---|---|
@@ -56,13 +63,14 @@ A lightweight, flexible internationalization (i18n) library for Go applications.
 - **Go 1.27+** (`go.mod` declares `go 1.27.0`)
 - `github.com/gofiber/fiber/v3` v3.4.0+ for the Fiber middleware
 
-This v2 module line targets Fiber v3. Applications still on Fiber v2 should
-remain on `github.com/soulteary/i18n-kit` v1.
+This v3 module line targets Fiber v3, and only the `fiberadapter` subpackage
+links it. Applications still on Fiber v2 should remain on
+`github.com/soulteary/i18n-kit` v1.
 
 ## Installation
 
 ```bash
-go get github.com/soulteary/i18n-kit/v2
+go get github.com/soulteary/i18n-kit/v3
 ```
 
 Fiber integrations require Fiber v3.4.0 or later. Applications that still use Fiber v2 should remain on `github.com/soulteary/i18n-kit` v1.
@@ -76,7 +84,7 @@ package main
 
 import (
     "fmt"
-    i18n "github.com/soulteary/i18n-kit/v2"
+    i18n "github.com/soulteary/i18n-kit/v3"
 )
 
 func main() {
@@ -106,7 +114,7 @@ package main
 
 import (
     "net/http"
-    i18n "github.com/soulteary/i18n-kit/v2"
+    i18n "github.com/soulteary/i18n-kit/v3"
 )
 
 func main() {
@@ -144,8 +152,8 @@ package main
 
 import (
     "github.com/gofiber/fiber/v3"
-    i18n "github.com/soulteary/i18n-kit/v2"
-    "github.com/soulteary/i18n-kit/v2/fiberadapter"
+    i18n "github.com/soulteary/i18n-kit/v3"
+    "github.com/soulteary/i18n-kit/v3/fiberadapter"
 )
 
 func main() {

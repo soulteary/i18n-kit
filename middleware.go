@@ -77,8 +77,16 @@ func ResolveMiddlewareConfig(config ...MiddlewareConfig) MiddlewareConfig {
 
 // LocalsLanguageKey and LocalsBundleKey are the keys under which a framework
 // adapter stores the detected language and the bundle on its per-request
-// storage. They match the net/http context keys, so a value set by one
-// framework reads back the same way everywhere.
+// storage, so that every adapter and every reader of one agrees on where to
+// look.
+//
+// They are NOT interchangeable with this package's net/http context keys. Those
+// spell the same two strings but have an unexported type, so a value stored
+// under LocalsLanguageKey does not read back through LanguageFromContext, and
+// TFromContext on such a framework answers in the default language without
+// reporting anything. Read the language through the adapter's own accessor --
+// fiberadapter.Language, say -- or call ContextWithLanguage yourself first if
+// you want the context helpers to see it.
 const (
 	LocalsLanguageKey = "i18n-language"
 	LocalsBundleKey   = "i18n-bundle"

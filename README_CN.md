@@ -1,6 +1,6 @@
 # i18n-kit
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit/v2.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit/v2)
+[![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit/v3.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit/v3)
 [![Go Report Card](.github/goreportcard.svg)](.github/goreportcard-report.md)
 [![CI](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/soulteary/i18n-kit/branch/main/graph/badge.svg)](https://codecov.io/gh/soulteary/i18n-kit)
@@ -11,10 +11,15 @@
 [English Documentation](README.md)
 
 
-> **v2.3.0 破坏性变更 —— Fiber 支持移入子包。**
-> Fiber 入口现位于 `github.com/soulteary/i18n-kit/v2/fiberadapter`，
+> **v3.0.0 —— Fiber 支持移入子包，模块路径升为 `/v3`。**
+> Fiber 入口现位于 `github.com/soulteary/i18n-kit/v3/fiberadapter`，
 > 于是导入根包不再把 Fiber（以及 fasthttp）链接进用不到它的二进制。
-> 对一个 net/http 服务来说，这意味着**少链接 25 个包、少 10 个模块、二进制小 25%**。
+> 对一个 net/http 服务来说，这意味着**少链接 25 个包、go.sum 从 48 行降到 8 行、
+> 二进制小 25%**（8080 KB → 6100 KB，实测程序只调用 `StdMiddleware` 和 `T()`）。
+>
+> 本次从根包删除了导出 API，因此作为新主版本发布，而不是 v2 的 minor：
+> **v2.2.0 原样继续可用**，升级是你主动改 import path 的行为，
+> 绝不会被 `go get -u` 悄悄换掉。
 >
 > | 原来 | 现在 |
 > |---|---|
@@ -51,13 +56,13 @@
 - **Go 1.27+**（`go.mod` 声明 `go 1.27.0`）
 - Fiber 中间件需要 `github.com/gofiber/fiber/v3` v3.4.0+
 
-v2 模块线面向 Fiber v3。仍在 Fiber v2 上的应用请继续使用
-`github.com/soulteary/i18n-kit` v1。
+v3 模块线面向 Fiber v3，且只有 `fiberadapter` 子包会链接它。
+仍在 Fiber v2 上的应用请继续使用 `github.com/soulteary/i18n-kit` v1。
 
 ## 安装
 
 ```bash
-go get github.com/soulteary/i18n-kit/v2
+go get github.com/soulteary/i18n-kit/v3
 ```
 
 Fiber 集成要求 Fiber v3.4.0 或更高版本。仍使用 Fiber v2 的应用应继续使用 `github.com/soulteary/i18n-kit` v1。
@@ -71,7 +76,7 @@ package main
 
 import (
     "fmt"
-    i18n "github.com/soulteary/i18n-kit/v2"
+    i18n "github.com/soulteary/i18n-kit/v3"
 )
 
 func main() {
@@ -101,7 +106,7 @@ package main
 
 import (
     "net/http"
-    i18n "github.com/soulteary/i18n-kit/v2"
+    i18n "github.com/soulteary/i18n-kit/v3"
 )
 
 func main() {
@@ -139,8 +144,8 @@ package main
 
 import (
     "github.com/gofiber/fiber/v3"
-    i18n "github.com/soulteary/i18n-kit/v2"
-    "github.com/soulteary/i18n-kit/v2/fiberadapter"
+    i18n "github.com/soulteary/i18n-kit/v3"
+    "github.com/soulteary/i18n-kit/v3/fiberadapter"
 )
 
 func main() {
@@ -405,17 +410,19 @@ func handler(w http.ResponseWriter, r *http.Request) {
 ### 完整配置
 
 ```go
-config := i18n.MiddlewareConfig{
-    Detector:       i18n.DefaultDetector,  // 语言检测器
-    Bundle:         myBundle,              // 自定义翻译包（可选）
-    SetCookie:      true,                  // 设置语言 Cookie
-    CookieName:     "lang",
-    CookieMaxAge:   86400 * 365,           // 1 年
-    CookiePath:     "/",
-    CookieSecure:   true,
-    CookieHTTPOnly: true,
-    CookieSameSite: "Lax",
-    Next: func(c fiber.Ctx) bool {        // 跳过中间件
+config := fiberadapter.Config{
+    MiddlewareConfig: i18n.MiddlewareConfig{
+        Detector:       i18n.DefaultDetector,  // 语言检测器
+        Bundle:         myBundle,              // 自定义翻译包（可选）
+        SetCookie:      true,                  // 设置语言 Cookie
+        CookieName:     "lang",
+        CookieMaxAge:   86400 * 365,           // 1 年
+        CookiePath:     "/",
+        CookieSecure:   true,
+        CookieHTTPOnly: true,
+        CookieSameSite: "Lax",
+    },
+    Next: func(c fiber.Ctx) bool {             // 跳过中间件
         return c.Path() == "/health"
     },
 }

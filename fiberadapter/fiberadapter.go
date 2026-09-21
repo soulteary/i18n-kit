@@ -13,7 +13,7 @@ package fiberadapter
 import (
 	"github.com/gofiber/fiber/v3"
 
-	i18n "github.com/soulteary/i18n-kit/v2"
+	i18n "github.com/soulteary/i18n-kit/v3"
 )
 
 // Source adapts a fiber.Ctx to i18n.RequestSource. Detection itself stays in
