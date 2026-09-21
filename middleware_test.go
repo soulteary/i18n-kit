@@ -188,3 +188,113 @@ func TestSimpleMiddleware(t *testing.T) {
 
 	assert.Equal(t, "de", rec.Body.String())
 }
+
+// ResolveMiddlewareConfig is what a framework adapter calls instead of
+// restating the merge rules, so the rules need testing directly rather than
+// only through whichever middleware happens to exercise them.
+
+func TestResolveMiddlewareConfig_NoArgsGivesDefaults(t *testing.T) {
+	assert.Equal(t, DefaultMiddlewareConfig(), ResolveMiddlewareConfig())
+}
+
+func TestResolveMiddlewareConfig_ZeroConfigKeepsDefaults(t *testing.T) {
+	cfg := ResolveMiddlewareConfig(MiddlewareConfig{})
+
+	assert.Equal(t, DefaultDetector, cfg.Detector)
+	assert.Nil(t, cfg.Bundle)
+	assert.Equal(t, "lang", cfg.CookieName)
+	assert.Equal(t, 86400*365, cfg.CookieMaxAge)
+	assert.Equal(t, "/", cfg.CookiePath)
+	assert.Equal(t, "Lax", cfg.CookieSameSite)
+	assert.True(t, cfg.CookieHTTPOnly)
+	assert.False(t, cfg.SetCookie)
+	assert.False(t, cfg.CookieSecure)
+}
+
+func TestResolveMiddlewareConfig_UserValuesOverrideDefaults(t *testing.T) {
+	detector := NewDetector(DetectorConfig{Priority: []string{"header"}})
+	bundle := NewBundle(LangEN)
+	nextStd := func(*http.Request) bool { return true }
+
+	cfg := ResolveMiddlewareConfig(MiddlewareConfig{
+		Detector:       detector,
+		Bundle:         bundle,
+		SetCookie:      true,
+		CookieName:     "site_lang",
+		CookieMaxAge:   60,
+		CookiePath:     "/app",
+		CookieSecure:   true,
+		CookieHTTPOnly: true,
+		CookieSameSite: "Strict",
+		NextStd:        nextStd,
+	})
+
+	assert.Same(t, detector, cfg.Detector)
+	assert.Same(t, bundle, cfg.Bundle)
+	assert.True(t, cfg.SetCookie)
+	assert.Equal(t, "site_lang", cfg.CookieName)
+	assert.Equal(t, 60, cfg.CookieMaxAge)
+	assert.Equal(t, "/app", cfg.CookiePath)
+	assert.True(t, cfg.CookieSecure)
+	assert.True(t, cfg.CookieHTTPOnly)
+	assert.Equal(t, "Strict", cfg.CookieSameSite)
+	require.NotNil(t, cfg.NextStd)
+	assert.True(t, cfg.NextStd(nil))
+}
+
+// Only the second argument onwards is ignored -- the variadic is "zero or one
+// config" in practice, and an adapter passing a slice must not get a silent
+// merge of both.
+func TestResolveMiddlewareConfig_IgnoresExtraConfigs(t *testing.T) {
+	cfg := ResolveMiddlewareConfig(
+		MiddlewareConfig{CookieName: "first"},
+		MiddlewareConfig{CookieName: "second", CookiePath: "/ignored"},
+	)
+
+	assert.Equal(t, "first", cfg.CookieName)
+	assert.Equal(t, "/", cfg.CookiePath)
+}
+
+// CookieHTTPOnly defaults to true and is only taken from the caller once the
+// caller has shown it is managing cookies, which mergeConfig infers from
+// CookieName or CookieSameSite being set. The upshot is a trap: naming the
+// cookie and nothing else silently turns HttpOnly off. Pinned so the rule the
+// adapters now share is explicit rather than folklore.
+func TestResolveMiddlewareConfig_CookieHTTPOnlyRule(t *testing.T) {
+	tests := []struct {
+		name string
+		user MiddlewareConfig
+		want bool
+	}{
+		{"untouched keeps the secure default", MiddlewareConfig{}, true},
+		{"unrelated field keeps the default", MiddlewareConfig{CookieMaxAge: 60}, true},
+		{"naming the cookie hands control over", MiddlewareConfig{CookieName: "site_lang"}, false},
+		{"setting SameSite hands control over", MiddlewareConfig{CookieSameSite: "Strict"}, false},
+		{"and can then be asked for explicitly", MiddlewareConfig{CookieName: "site_lang", CookieHTTPOnly: true}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ResolveMiddlewareConfig(tt.user).CookieHTTPOnly)
+		})
+	}
+}
+
+// StdMiddleware must go through ResolveMiddlewareConfig rather than keeping its
+// own copy of the defaults: that equivalence is the whole point of exporting it.
+func TestStdMiddleware_UsesResolvedConfig(t *testing.T) {
+	cfg := ResolveMiddlewareConfig(MiddlewareConfig{SetCookie: true, CookieName: "site_lang", CookieHTTPOnly: true})
+
+	handler := StdMiddleware(MiddlewareConfig{SetCookie: true, CookieName: "site_lang", CookieHTTPOnly: true})(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?lang=zh", nil))
+
+	cookies := rec.Result().Cookies()
+	require.Len(t, cookies, 1)
+	assert.Equal(t, cfg.CookieName, cookies[0].Name)
+	assert.Equal(t, cfg.CookieMaxAge, cookies[0].MaxAge)
+	assert.Equal(t, cfg.CookiePath, cookies[0].Path)
+	assert.Equal(t, cfg.CookieHTTPOnly, cookies[0].HttpOnly)
+}

@@ -257,3 +257,58 @@ func TestGlobalTranslator_ConcurrentAccess(t *testing.T) {
 	lang := GetGlobalLanguage()
 	assert.True(t, lang == LangEN || lang == LangZH)
 }
+
+// FormatTranslation is the exported half of formatTranslation, there so an
+// out-of-tree adapter can implement Tf as Lookup + format without restating the
+// missing-key rule. It has to keep agreeing with the unexported one.
+
+func TestFormatTranslation(t *testing.T) {
+	tests := []struct {
+		name  string
+		text  string
+		found bool
+		args  []interface{}
+		want  string
+	}{
+		{"found, args applied", "Hello, %s", true, []interface{}{"Alice"}, "Hello, Alice"},
+		{"found, several args", "%s is %d", true, []interface{}{"Alice", 30}, "Alice is 30"},
+		{"found, no args", "Hello", true, nil, "Hello"},
+		{"found, percent escape still renders", "Save 10%%", true, nil, "Save 10%"},
+		{"missing key returned as-is", "user.greeting", false, []interface{}{"alice@example.com"}, "user.greeting"},
+		{"missing key with no args", "user.greeting", false, nil, "user.greeting"},
+		{"missing key holding a verb is not formatted", "user.%s.greeting", false, []interface{}{"alice"}, "user.%s.greeting"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, FormatTranslation(tt.text, tt.found, tt.args...))
+			assert.Equal(t, formatTranslation(tt.text, tt.found, tt.args...), FormatTranslation(tt.text, tt.found, tt.args...))
+		})
+	}
+}
+
+// The reason the missing-key rule exists: handing a key to Sprintf with
+// arguments appends "%!(EXTRA ...)", putting the arguments -- an email address,
+// a phone number, a user id -- into the message the user sees.
+func TestFormatTranslation_MissingKeyDoesNotLeakArguments(t *testing.T) {
+	out := FormatTranslation("account.deleted", false, "alice@example.com")
+
+	assert.Equal(t, "account.deleted", out)
+	assert.NotContains(t, out, "alice@example.com")
+	assert.NotContains(t, out, "%!")
+}
+
+// Lookup + FormatTranslation is the pair an adapter composes; it has to produce
+// what the in-tree Tf entry points produce.
+func TestFormatTranslation_MatchesBundleTfBehaviour(t *testing.T) {
+	bundle := NewBundle(LangEN)
+	bundle.AddTranslation(LangEN, "greeting", "Hello, %s")
+
+	for _, key := range []string{"greeting", "no.such.key"} {
+		text, found := bundle.LookupTranslation(LangEN, key)
+		assert.Equal(t,
+			NewTranslator(bundle).TfWithLang(LangEN, key, "Alice"),
+			FormatTranslation(text, found, "Alice"),
+		)
+	}
+}
