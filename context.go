@@ -2,7 +2,6 @@ package i18n
 
 import (
 	"context"
-	"net/http"
 )
 
 // contextKey is used to store language in context.
@@ -37,20 +36,6 @@ func LanguageFromContextOK(ctx context.Context) (Language, bool) {
 	return lang, ok
 }
 
-// SetLanguageInRequest sets the language in the request context.
-func SetLanguageInRequest(r *http.Request, lang Language) *http.Request {
-	return r.WithContext(ContextWithLanguage(r.Context(), lang))
-}
-
-// LanguageFromRequest extracts the language from the request context.
-// Returns DefaultLanguage if not found.
-func LanguageFromRequest(r *http.Request) Language {
-	if r == nil {
-		return DefaultLanguage
-	}
-	return LanguageFromContext(r.Context())
-}
-
 // TFromContext returns the translated string using the language from context.
 func TFromContext(ctx context.Context, key string) string {
 	lang := LanguageFromContext(ctx)
@@ -63,21 +48,6 @@ func TFromContext(ctx context.Context, key string) string {
 // are NOT applied; see formatTranslation.
 func TfFromContext(ctx context.Context, key string, args ...interface{}) string {
 	text, found := DefaultBundle.LookupTranslation(LanguageFromContext(ctx), key)
-	return formatTranslation(text, found, args...)
-}
-
-// TFromRequest returns the translated string using the language from request context.
-func TFromRequest(r *http.Request, key string) string {
-	lang := LanguageFromRequest(r)
-	return DefaultBundle.GetTranslation(lang, key)
-}
-
-// TfFromRequest returns a formatted translated string using the language from request context.
-//
-// If the key has no translation, the key is returned as-is and the arguments
-// are NOT applied; see formatTranslation.
-func TfFromRequest(r *http.Request, key string, args ...interface{}) string {
-	text, found := DefaultBundle.LookupTranslation(LanguageFromRequest(r), key)
 	return formatTranslation(text, found, args...)
 }
 

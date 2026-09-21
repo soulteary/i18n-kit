@@ -17,8 +17,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	i18n "github.com/soulteary/i18n-kit/v3"
-	"github.com/soulteary/i18n-kit/v3/fiberadapter"
+	i18n "github.com/soulteary/i18n-kit/v4"
+	"github.com/soulteary/i18n-kit/v4/fiberadapter"
+	"github.com/soulteary/i18n-kit/v4/httpadapter"
 )
 
 // shape mutates a fresh GET / request; each case is applied to both stacks.
@@ -34,8 +35,8 @@ func langViaNetHTTP(t *testing.T, s shape) string {
 	t.Helper()
 
 	var got i18n.Language
-	handler := i18n.StdMiddleware()(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		got = i18n.LanguageFromRequest(r)
+	handler := httpadapter.Middleware()(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got = httpadapter.Language(r)
 	}))
 	handler.ServeHTTP(httptest.NewRecorder(), newRequest(s))
 
@@ -235,7 +236,7 @@ func TestDetectParityWithDetectFromRequest(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, resp.Body.Close())
 
-		assert.Equal(t, string(i18n.DetectFromRequest(newRequest(s))), string(body))
+		assert.Equal(t, string(httpadapter.Detect(newRequest(s))), string(body))
 	}
 }
 
@@ -249,7 +250,7 @@ func TestDetectParityWithDetectFromRequest(t *testing.T) {
 func cookieViaNetHTTP(t *testing.T, cfg i18n.MiddlewareConfig) *http.Cookie {
 	t.Helper()
 
-	handler := i18n.StdMiddleware(cfg)(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
+	handler := httpadapter.Middleware(httpadapter.Config{MiddlewareConfig: cfg})(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?lang=zh", nil))
 

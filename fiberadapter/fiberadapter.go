@@ -13,7 +13,7 @@ package fiberadapter
 import (
 	"github.com/gofiber/fiber/v3"
 
-	i18n "github.com/soulteary/i18n-kit/v3"
+	i18n "github.com/soulteary/i18n-kit/v4"
 )
 
 // Source adapts a fiber.Ctx to i18n.RequestSource. Detection itself stays in
@@ -30,7 +30,7 @@ func (s Source) Cookie(name string) string { return s.C.Cookies(name) }
 func (s Source) Header(name string) string { return s.C.Get(name) }
 
 // Detect detects the language of a Fiber request using the package-level
-// default detector. It is the Fiber counterpart of i18n.DetectFromRequest.
+// default detector. It is the Fiber counterpart of httpadapter.Detect.
 func Detect(c fiber.Ctx) i18n.Language {
 	return i18n.DefaultDetector.Detect(Source{C: c})
 }
@@ -52,7 +52,7 @@ type Config struct {
 }
 
 // Middleware creates a Fiber middleware for language detection.
-// It is the Fiber counterpart of i18n.StdMiddleware.
+// It is the Fiber counterpart of httpadapter.Middleware.
 func Middleware(config ...Config) fiber.Handler {
 	var next func(c fiber.Ctx) bool
 	var base []i18n.MiddlewareConfig
@@ -97,7 +97,7 @@ func Middleware(config ...Config) fiber.Handler {
 }
 
 // SimpleMiddleware creates a middleware that only detects language.
-// It is the Fiber counterpart of i18n.SimpleMiddleware.
+// It is the Fiber counterpart of httpadapter.SimpleMiddleware.
 func SimpleMiddleware() fiber.Handler { return Middleware() }
 
 // Language extracts the detected language from Fiber locals.

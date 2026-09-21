@@ -1,6 +1,6 @@
 # i18n-kit
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit/v3.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit/v3)
+[![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit/v4.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit/v4)
 [![Go Report Card](.github/goreportcard.svg)](.github/goreportcard-report.md)
 [![CI](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/soulteary/i18n-kit/branch/main/graph/badge.svg)](https://codecov.io/gh/soulteary/i18n-kit)
@@ -13,83 +13,118 @@ A lightweight, flexible internationalization (i18n) library for Go applications.
 [中文文档](README_CN.md)
 
 
-> **v3.0.0 — Fiber support moved to a subpackage, and the module is now `/v3`.**
-> The Fiber entry points are now `github.com/soulteary/i18n-kit/v3/fiberadapter`,
-> so importing the root package no longer links Fiber (and fasthttp) into
-> binaries that never use it. In a net/http service that means **25 fewer
-> linked packages, a go.sum shrinking from 48 lines to 8, and a 25% smaller
-> binary** (8080 KB → 6100 KB, measured on a program that only calls
-> `StdMiddleware` and `T()`).
+> **Breaking in v4.0.0 — new module path, and net/http and YAML each moved to a
+> subpackage.**
 >
-> This removes exported API from the root package, so it goes out as a new
-> major version rather than a v2 minor: **v2.2.0 keeps working untouched**, and
-> upgrading is a deliberate edit of your import path, never something
-> `go get -u` does to you.
+> **Step 1 — everyone, including programs that serve no HTTP.** The module path
+> is now `github.com/soulteary/i18n-kit/v4`:
+>
+> ```bash
+> go get github.com/soulteary/i18n-kit/v4
+> go mod edit -droprequire github.com/soulteary/i18n-kit/v3
+> ```
+>
+> Then update the import path in your source. The major-version bump is required
+> by Go's import compatibility rule, because v4 removes exported symbols;
+> keeping them as shims was not an option, since a shim imports the very
+> packages being moved.
+>
+> **Step 2 — net/http users.** The middleware, the `*http.Request` helpers and
+> the request adapter moved to `github.com/soulteary/i18n-kit/v4/httpadapter`,
+> so importing the root package no longer links a web server into a binary that
+> never starts one. Translation is just as useful in a CLI printing localized
+> help or error messages, and for a program importing only the root package this
+> is **122 fewer linked packages and a 50% smaller binary** (203 → 81 packages,
+> 3,940,615 → 1,974,432 bytes, `-trimpath -ldflags="-s -w"` on linux/amd64).
 >
 > | Before | After |
 > |---|---|
-> | `i18n.FiberMiddleware(...)` | `fiberadapter.Middleware(...)` |
-> | `i18n.SimpleFiberMiddleware()` | `fiberadapter.SimpleMiddleware()` |
-> | `i18n.DetectFromFiber(c)` | `fiberadapter.Detect(c)` |
-> | `detector.DetectFromFiber(c)` | `fiberadapter.DetectWith(detector, c)` |
-> | `i18n.LanguageFromFiberLocals(c)` | `fiberadapter.Language(c)` |
-> | `i18n.BundleFromFiberLocals(c)` | `fiberadapter.Bundle(c)` |
-> | `i18n.TFromFiber(c, key)` | `fiberadapter.T(c, key)` |
-> | `i18n.TfFromFiber(c, key, args...)` | `fiberadapter.Tf(c, key, args...)` |
+> | `i18n.StdMiddleware(c)` | `httpadapter.Middleware(c)` |
+> | `i18n.StdMiddlewareFunc(c)` | `httpadapter.MiddlewareFunc(c)` |
+> | `i18n.SimpleMiddleware()` | `httpadapter.SimpleMiddleware()` |
+> | `i18n.DetectFromRequest(r)` | `httpadapter.Detect(r)` |
+> | `detector.DetectFromRequest(r)` | `httpadapter.DetectWith(detector, r)` |
+> | `i18n.RequestSourceOf(r)` | `httpadapter.RequestSourceOf(r)` |
+> | `i18n.SetLanguageInRequest(r, lang)` | `httpadapter.SetLanguage(r, lang)` |
+> | `i18n.LanguageFromRequest(r)` | `httpadapter.Language(r)` |
+> | `i18n.TFromRequest(r, key)` | `httpadapter.T(r, key)` |
+> | `i18n.TfFromRequest(r, key, args...)` | `httpadapter.Tf(r, key, args...)` |
+> | `mode.HTTPSameSite()` | `httpadapter.SameSite(mode)` |
+> | `MiddlewareConfig.NextStd` | `httpadapter.Config.Next` |
 >
-> `MiddlewareConfig.Next` moved too: a `func(fiber.Ctx) bool` field is exactly
-> what pulled Fiber into the root package, so it now lives on
-> `fiberadapter.Config`, which embeds `i18n.MiddlewareConfig`. `NextStd` and
-> everything on the net/http side are unchanged.
+> `MiddlewareConfig.NextStd` moved for the same reason `Next` moved to
+> `fiberadapter.Config` in v3: a `func(*http.Request) bool` field is exactly what
+> pulled net/http into the root package. `httpadapter.Config` embeds
+> `i18n.MiddlewareConfig` and adds `Next`, mirroring `fiberadapter.Config`
+> exactly.
 >
-> One behaviour fix rides along: `TfFromFiber` discarded its arguments
-> entirely, so `"%s"` came out literal on Fiber while `TfFromContext`
-> formatted it correctly. `fiberadapter.Tf` formats.
+> **Step 3 — YAML translation users.** `LoadYAML` and `LoadYAMLFile` moved to
+> `github.com/soulteary/i18n-kit/v4/yamlloader`, because a YAML parser in the
+> root package was paid for by every program, including the majority whose
+> translation files are JSON — which the standard library already reads.
 >
-> **Two config booleans were renamed so their zero value is the documented
-> default.** Both were plain positive bools that could not be told apart from
-> "not set", and both had a workaround that misfired:
+> | Before | After |
+> |---|---|
+> | `bundle.LoadYAML(lang, data)` | `yamlloader.Load(bundle, lang, data)` |
+> | `bundle.LoadYAMLFile(lang, path)` | `yamlloader.LoadFile(bundle, lang, path)` |
+> | `bundle.LoadDirectory(dir)` *(with any .yaml/.yml in it)* | `yamlloader.LoadDirectory(bundle, dir)` |
 >
-> | Before | After | Why |
-> |---|---|---|
-> | `DetectorConfig.AcceptLanguage bool` (default `true`) | `DisableAcceptLanguage bool` | `NewDetector(DetectorConfig{})` kept `"accept"` in the default `Priority` while leaving the step off, so Accept-Language was silently ignored |
-> | `MiddlewareConfig.CookieHTTPOnly bool` (default `true`) | `DisableCookieHTTPOnly bool` | the merge took your value only once `CookieName` or `CookieSameSite` was set, so naming the cookie and nothing else silently cleared `HttpOnly` |
+> **`Bundle.LoadDirectory` now reads only `.json`.** A directory containing
+> `.yaml` or `.yml` returns an error naming `yamlloader.LoadDirectory` rather
+> than silently loading half the translations — that is the one behaviour change
+> in this release, and it is loud on purpose. An all-JSON directory is
+> unaffected.
 >
-> Both renames are compile errors rather than silent behaviour changes, whichever
-> value you were setting.
+> **If you use neither, there is no step 2 or 3.** Bundles, the `Translator`,
+> `Detector`, `RequestSource`, the context helpers, `MiddlewareConfig`,
+> `ResolveMiddlewareConfig`, `ResolveCookieSameSite` and every formatting and
+> pluralization function stayed in the root package with their v3 signatures.
+> `fiberadapter` changes only its import path.
 >
-> **`CookieSameSite` is now interpreted in one place** — `ResolveCookieSameSite`
-> — instead of once per framework. Matching is case-insensitive, `"disabled"`
-> omits the attribute, anything unrecognised means `"Lax"`, and `"None"` forces
-> `Secure` on. Previously `"strict"` meant `Strict` on Fiber and `Lax` on
-> net/http, and net/http emitted `SameSite=None` *without* `Secure`, which
-> browsers reject — so that cookie was never stored.
+> → **[Upgrade Notes (v4.0.0)](#upgrade-notes-v400)**
 
 ## Features
 
 - **Multiple Language Support**: Built-in support for 10+ languages (EN, ZH, FR, DE, JA, KO, IT, ES, PT, RU)
 - **Language Detection**: Automatic detection from query parameters, cookies, headers, and Accept-Language
 - **Translation Bundles**: Thread-safe translation management with fallback support
-- **Framework-Agnostic**: net/http middleware built in, Fiber v3 in a subpackage, and any other framework in ~20 lines — detection runs against a three-method interface
-- **Pay Only For What You Import**: the root package pulls in one non-stdlib dependency (`gopkg.in/yaml.v3`); Fiber and fasthttp are linked only if you import `fiberadapter`
+- **Framework-Agnostic**: net/http in `httpadapter`, Fiber v3 in `fiberadapter`, and any other framework in ~20 lines — detection runs against a three-method interface
+- **Pay Only For What You Import**: the root package depends on nothing outside the standard library and does not import `net/http` — the web server, Fiber, and the YAML parser each live behind their own subpackage
 - **Context Integration**: Store and retrieve language from context
 - **Named Parameters**: Support for `{name}` style parameter substitution
 - **Pluralization**: Simple plural form handling
-- **File Loading**: Load translations from JSON or YAML files
+- **File Loading**: JSON out of the box; YAML via the `yamlloader` subpackage
 
 ## Requirements
 
 - **Go 1.27+** (`go.mod` declares `go 1.27.0`)
-- `github.com/gofiber/fiber/v3` v3.4.0+ for the Fiber middleware
+- `github.com/gofiber/fiber/v3` v3.4.0+ — only for the `fiberadapter` subpackage
+- `gopkg.in/yaml.v3` — only for the `yamlloader` subpackage
+- the `httpadapter` subpackage and the root package need nothing but the standard library
 
-This v3 module line targets Fiber v3, and only the `fiberadapter` subpackage
+This v4 module line targets Fiber v3, and only the `fiberadapter` subpackage
 links it. Applications still on Fiber v2 should remain on
 `github.com/soulteary/i18n-kit` v1.
 
 ## Installation
 
 ```bash
-go get github.com/soulteary/i18n-kit/v3
+go get github.com/soulteary/i18n-kit/v4
+```
+
+The root package depends on nothing outside the standard library — not even
+`net/http`. Everything that needs a dependency lives in its own subpackage, so a
+binary links only what it actually uses:
+
+```bash
+# net/http middleware and *http.Request helpers — standard library only
+go get github.com/soulteary/i18n-kit/v4/httpadapter
+
+# YAML translation files — links gopkg.in/yaml.v3
+go get github.com/soulteary/i18n-kit/v4/yamlloader
+
+# Fiber v3 middleware — links Fiber, and with it fasthttp
+go get github.com/soulteary/i18n-kit/v4/fiberadapter
 ```
 
 Fiber integrations require Fiber v3.4.0 or later. Applications that still use Fiber v2 should remain on `github.com/soulteary/i18n-kit` v1.
@@ -103,7 +138,7 @@ package main
 
 import (
     "fmt"
-    i18n "github.com/soulteary/i18n-kit/v3"
+    i18n "github.com/soulteary/i18n-kit/v4"
 )
 
 func main() {
@@ -133,7 +168,8 @@ package main
 
 import (
     "net/http"
-    i18n "github.com/soulteary/i18n-kit/v3"
+    i18n "github.com/soulteary/i18n-kit/v4"
+    "github.com/soulteary/i18n-kit/v4/httpadapter"
 )
 
 func main() {
@@ -148,12 +184,12 @@ func main() {
     // Create handler
     handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         // Get translation using language from request
-        greeting := i18n.TFromRequest(r, "greeting")
+        greeting := httpadapter.T(r, "greeting")
         w.Write([]byte(greeting))
     })
 
     // Apply middleware
-    http.Handle("/", i18n.StdMiddleware()(handler))
+    http.Handle("/", httpadapter.Middleware()(handler))
     http.ListenAndServe(":8080", nil)
 }
 ```
@@ -171,8 +207,8 @@ package main
 
 import (
     "github.com/gofiber/fiber/v3"
-    i18n "github.com/soulteary/i18n-kit/v3"
-    "github.com/soulteary/i18n-kit/v3/fiberadapter"
+    i18n "github.com/soulteary/i18n-kit/v4"
+    "github.com/soulteary/i18n-kit/v4/fiberadapter"
 )
 
 func main() {
@@ -235,7 +271,7 @@ A detector runs against anything that can answer three questions, not just an
 
 ```go
 lang := detector.DetectFromRequest(r)             // net/http
-lang := detector.Detect(i18n.RequestSourceOf(r))  // the same thing, spelled out
+lang := detector.Detect(httpadapter.RequestSourceOf(r))  // the same thing, spelled out
 lang := detector.Detect(mySource)                 // any i18n.RequestSource
 ```
 
@@ -266,7 +302,7 @@ bundle.AddTranslations(i18n.LangFR, map[string]string{
 bundle.LoadJSONFile(i18n.LangEN, "locales/en.json")
 
 // Load from YAML
-bundle.LoadYAMLFile(i18n.LangZH, "locales/zh.yaml")
+yamlloader.LoadFile(bundle, i18n.LangZH, "locales/zh.yaml")
 
 // Load entire directory
 // Files should be named: en.json, zh.yaml, fr.json, etc.
@@ -379,7 +415,7 @@ i18n.Tf("greeting", "Alice", 30)
 i18n.TfWithLang(i18n.LangZH, "greeting", "Alice", 30)
 
 // Request- and context-scoped
-i18n.TfFromRequest(r, "greeting", "Alice", 30)
+httpadapter.Tf(r, "greeting", "Alice", 30)
 i18n.TfFromContext(ctx, "greeting", "Alice", 30)
 i18n.TfFromContextWithBundle(ctx, "greeting", "Alice", 30)
 fiberadapter.Tf(c, "greeting", "Alice", 30)
@@ -455,10 +491,10 @@ translation := i18n.TFromContext(ctx, "greeting")
 ```go
 func handler(w http.ResponseWriter, r *http.Request) {
     // Get language from request context
-    lang := i18n.LanguageFromRequest(r)
+    lang := httpadapter.Language(r)
     
     // Get translation
-    greeting := i18n.TFromRequest(r, "greeting")
+    greeting := httpadapter.T(r, "greeting")
 }
 ```
 
@@ -516,8 +552,8 @@ config := fiberadapter.Config{
 }
 
 // For net/http
-config := i18n.MiddlewareConfig{
-    NextStd: func(r *http.Request) bool {
+config := httpadapter.Config{
+    Next: func(r *http.Request) bool {
         return r.URL.Path == "/api/internal"
     },
 }
@@ -547,7 +583,7 @@ than restated, so a new adapter cannot drift from the built-in ones:
 | Apply the config defaults and merge rules | `i18n.ResolveMiddlewareConfig(cfg...)` |
 | Interpret `CookieSameSite` | `i18n.ResolveCookieSameSite(value)` |
 | Implement `Tf` correctly | `bundle.LookupTranslation(...)` + `i18n.FormatTranslation(...)` |
-| Adapt an `*http.Request` | `i18n.RequestSourceOf(r)` |
+| Adapt an `*http.Request` | `httpadapter.RequestSourceOf(r)` |
 | Agree on where to store the result | `i18n.LocalsLanguageKey`, `i18n.LocalsBundleKey` |
 
 A complete adapter, for Echo:
@@ -559,7 +595,8 @@ import (
     "net/http"
 
     "github.com/labstack/echo/v4"
-    i18n "github.com/soulteary/i18n-kit/v3"
+    i18n "github.com/soulteary/i18n-kit/v4"
+    "github.com/soulteary/i18n-kit/v4/httpadapter"
 )
 
 type Source struct{ C echo.Context }
@@ -598,7 +635,7 @@ func Middleware(config ...i18n.MiddlewareConfig) echo.MiddlewareFunc {
                     Secure:   cfg.CookieSecure || mode.RequiresSecure(),
                     HttpOnly: !cfg.DisableCookieHTTPOnly,
                 }
-                if sameSite, ok := mode.HTTPSameSite(); ok {
+                if sameSite, ok := httpadapter.SameSite(mode); ok {
                     cookie.SameSite = sameSite
                 }
                 c.SetCookie(cookie)
@@ -686,6 +723,73 @@ All components are thread-safe:
 - `Bundle`: Safe for concurrent reads and writes
 - `Translator`: Safe for concurrent use
 - Global functions: Protected by mutex
+
+## Upgrade Notes (v4.0.0)
+
+1. **Change the module path.** Every import, in every file:
+
+   ```bash
+   go get github.com/soulteary/i18n-kit/v4
+   go mod edit -droprequire github.com/soulteary/i18n-kit/v3
+   ```
+
+   ```diff
+   -i18n "github.com/soulteary/i18n-kit/v3"
+   +i18n "github.com/soulteary/i18n-kit/v4"
+   ```
+
+   `go get -u` will not do this for you; v3 stays on `v3.0.0`.
+
+2. **Re-point the net/http entry points** at
+   `github.com/soulteary/i18n-kit/v4/httpadapter` — the table in the notice at
+   the top of this file lists all eleven. Names lost the parts that the package
+   name now carries: `StdMiddleware` is `httpadapter.Middleware`,
+   `LanguageFromRequest` is `httpadapter.Language`, and so on, mirroring
+   `fiberadapter`.
+
+3. **Move `MiddlewareConfig.NextStd`** onto `httpadapter.Config`, which embeds
+   `i18n.MiddlewareConfig`, exactly as `fiberadapter.Config` does for Fiber's
+   `Next`:
+
+   ```diff
+   -config := i18n.MiddlewareConfig{
+   -    NextStd: skip,
+   -}
+   -handler = i18n.StdMiddleware(config)(handler)
+   +config := httpadapter.Config{
+   +    MiddlewareConfig: i18n.MiddlewareConfig{ /* ... */ },
+   +    Next:             skip,
+   +}
+   +handler = httpadapter.Middleware(config)(handler)
+   ```
+
+4. **Re-point YAML loading** at `github.com/soulteary/i18n-kit/v4/yamlloader`:
+
+   ```diff
+   -err := bundle.LoadYAMLFile(i18n.LangZH, "locales/zh.yaml")
+   +err := yamlloader.LoadFile(bundle, i18n.LangZH, "locales/zh.yaml")
+   ```
+
+   **If you load a directory containing YAML, this one is not a compile error.**
+   `Bundle.LoadDirectory` still exists and still compiles; it now reads only
+   `.json` and returns an error when it meets a `.yaml` or `.yml` file, naming
+   `yamlloader.LoadDirectory` as the fix. It was made loud rather than silent
+   precisely because a half-loaded translation set is invisible until someone
+   reports a page of untranslated keys. Directories of JSON are unaffected.
+
+   `LoadDirectoryWith` is new and takes the extensions it understands as a
+   `map[string]i18n.Decoder`, which is how `yamlloader.LoadDirectory` adds YAML
+   without this package importing a YAML library. TOML or `.properties` is
+   twenty lines and needs no change here.
+
+5. **If you use neither net/http nor YAML, steps 2 to 4 do not apply.** Bundles,
+   `Translator`, `Detector`, `RequestSource`, the context helpers,
+   `MiddlewareConfig`, `ResolveMiddlewareConfig`, `ResolveCookieSameSite`, and
+   every formatting and pluralization function kept their v3 signatures in the
+   root package. `fiberadapter` users change only the import path.
+
+Nothing else changed: no detection rule, no cookie attribute, no formatting
+behaviour, no translation output.
 
 ## Upgrade Notes (v3.0.0)
 

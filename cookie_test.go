@@ -1,8 +1,6 @@
 package i18n
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -57,43 +55,6 @@ func TestResolveCookieSameSite_IsIdempotent(t *testing.T) {
 	}
 }
 
-func TestCookieSameSiteMode_HTTPSameSite(t *testing.T) {
-	tests := []struct {
-		mode     CookieSameSiteMode
-		want     http.SameSite
-		wantWrit bool
-	}{
-		{SameSiteLax, http.SameSiteLaxMode, true},
-		{SameSiteStrict, http.SameSiteStrictMode, true},
-		{SameSiteNone, http.SameSiteNoneMode, true},
-		{SameSiteDisabled, 0, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(string(tt.mode), func(t *testing.T) {
-			got, write := tt.mode.HTTPSameSite()
-			assert.Equal(t, tt.wantWrit, write)
-			if write {
-				assert.Equal(t, tt.want, got)
-			}
-		})
-	}
-}
-
-// "disabled" means no attribute at all, which is not the same as Lax -- the
-// browser's own default applies instead.
-func TestCookieSameSiteMode_DisabledWritesNoAttribute(t *testing.T) {
-	_, write := SameSiteDisabled.HTTPSameSite()
-	assert.False(t, write)
-
-	laxMode, write := SameSiteLax.HTTPSameSite()
-	assert.True(t, write)
-	assert.Equal(t, http.SameSiteLaxMode, laxMode)
-}
-
-// SameSite=None without Secure is rejected by current browsers, so the cookie
-// is never stored and detection silently falls back to Accept-Language on every
-// request. Only None obliges it.
 func TestCookieSameSiteMode_RequiresSecure(t *testing.T) {
 	assert.True(t, SameSiteNone.RequiresSecure())
 	assert.False(t, SameSiteLax.RequiresSecure())
@@ -103,42 +64,3 @@ func TestCookieSameSiteMode_RequiresSecure(t *testing.T) {
 
 // StdMiddleware honours RequiresSecure even when CookieSecure says otherwise:
 // the alternative is emitting a cookie the browser throws away.
-func TestStdMiddleware_NoneForcesSecure(t *testing.T) {
-	handler := StdMiddleware(MiddlewareConfig{
-		SetCookie:      true,
-		CookieSameSite: "None",
-		CookieSecure:   false,
-	})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-
-	rec := newRecordedCookie(t, handler)
-
-	assert.Equal(t, http.SameSiteNoneMode, rec.SameSite)
-	assert.True(t, rec.Secure, "SameSite=None without Secure is dropped by browsers")
-}
-
-// Nothing else promotes Secure on its own.
-func TestStdMiddleware_SecureNotForcedOtherwise(t *testing.T) {
-	for _, sameSite := range []string{"", "Lax", "Strict", "disabled"} {
-		handler := StdMiddleware(MiddlewareConfig{
-			SetCookie:      true,
-			CookieSameSite: sameSite,
-		})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-
-		assert.False(t, newRecordedCookie(t, handler).Secure, "SameSite=%q", sameSite)
-	}
-}
-
-func newRecordedCookie(t *testing.T, handler http.Handler) *http.Cookie {
-	t.Helper()
-
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?lang=zh", nil))
-
-	for _, c := range rec.Result().Cookies() {
-		if c.Name == "lang" {
-			return c
-		}
-	}
-	t.Fatal("no lang cookie was written")
-	return nil
-}

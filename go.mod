@@ -1,4 +1,4 @@
-module github.com/soulteary/i18n-kit/v3
+module github.com/soulteary/i18n-kit/v4
 
 go 1.27.0
 

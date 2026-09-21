@@ -1,7 +1,6 @@
 package i18n
 
 import (
-	"net/http"
 	"strings"
 )
 
@@ -45,22 +44,6 @@ func ResolveCookieSameSite(value string) CookieSameSiteMode {
 		return SameSiteDisabled
 	default:
 		return SameSiteLax
-	}
-}
-
-// HTTPSameSite returns the net/http constant for m. The second result is false
-// when no SameSite attribute should be written at all, which is not the same as
-// writing SameSite=Lax.
-func (m CookieSameSiteMode) HTTPSameSite() (http.SameSite, bool) {
-	switch m {
-	case SameSiteStrict:
-		return http.SameSiteStrictMode, true
-	case SameSiteNone:
-		return http.SameSiteNoneMode, true
-	case SameSiteDisabled:
-		return 0, false
-	default:
-		return http.SameSiteLaxMode, true
 	}
 }
 

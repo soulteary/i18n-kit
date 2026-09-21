@@ -1,6 +1,6 @@
 # i18n-kit
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit/v3.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit/v3)
+[![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit/v4.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit/v4)
 [![Go Report Card](.github/goreportcard.svg)](.github/goreportcard-report.md)
 [![CI](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/soulteary/i18n-kit/branch/main/graph/badge.svg)](https://codecov.io/gh/soulteary/i18n-kit)
@@ -11,73 +11,108 @@
 [English Documentation](README.md)
 
 
-> **v3.0.0 —— Fiber 支持移入子包，模块路径升为 `/v3`。**
-> Fiber 入口现位于 `github.com/soulteary/i18n-kit/v3/fiberadapter`，
-> 于是导入根包不再把 Fiber（以及 fasthttp）链接进用不到它的二进制。
-> 对一个 net/http 服务来说，这意味着**少链接 25 个包、go.sum 从 48 行降到 8 行、
-> 二进制小 25%**（8080 KB → 6100 KB，实测程序只调用 `StdMiddleware` 和 `T()`）。
+> **v4.0.0 的破坏性变更 —— 模块路径变了，net/http 与 YAML 各自移进了子包。**
 >
-> 本次从根包删除了导出 API，因此作为新主版本发布，而不是 v2 的 minor：
-> **v2.2.0 原样继续可用**，升级是你主动改 import path 的行为，
-> 绝不会被 `go get -u` 悄悄换掉。
+> **第一步 —— 所有人，包括完全不提供 HTTP 服务的程序。** 模块路径现在是
+> `github.com/soulteary/i18n-kit/v4`：
 >
-> | 原来 | 现在 |
+> ```bash
+> go get github.com/soulteary/i18n-kit/v4
+> go mod edit -droprequire github.com/soulteary/i18n-kit/v3
+> ```
+>
+> 然后改掉源码里的 import 路径。主版本号必须跳，这是 Go 的导入兼容性规则决定的：
+> v4 删掉了导出符号。留转发用的空壳不是一个选项 —— 空壳自己就要 import 被搬走的
+> 那些包。
+>
+> **第二步 —— net/http 用户。** 中间件、`*http.Request` 系列 helper 和请求适配器
+> 移到了 `github.com/soulteary/i18n-kit/v4/httpadapter`，于是导入根包不再把一个
+> 从未启动的 Web 服务器链接进二进制。翻译在打印本地化帮助或错误信息的 CLI 里同样
+> 有用，而对只导入根包的程序来说，这意味着
+> **少链接 122 个包、二进制小 50%**（203 → 81 个包，3,940,615 → 1,974,432 字节，
+> linux/amd64 上 `-trimpath -ldflags="-s -w"` 实测）。
+>
+> | 改之前 | 改之后 |
 > |---|---|
-> | `i18n.FiberMiddleware(...)` | `fiberadapter.Middleware(...)` |
-> | `i18n.SimpleFiberMiddleware()` | `fiberadapter.SimpleMiddleware()` |
-> | `i18n.DetectFromFiber(c)` | `fiberadapter.Detect(c)` |
-> | `detector.DetectFromFiber(c)` | `fiberadapter.DetectWith(detector, c)` |
-> | `i18n.LanguageFromFiberLocals(c)` | `fiberadapter.Language(c)` |
-> | `i18n.BundleFromFiberLocals(c)` | `fiberadapter.Bundle(c)` |
-> | `i18n.TFromFiber(c, key)` | `fiberadapter.T(c, key)` |
-> | `i18n.TfFromFiber(c, key, args...)` | `fiberadapter.Tf(c, key, args...)` |
+> | `i18n.StdMiddleware(c)` | `httpadapter.Middleware(c)` |
+> | `i18n.StdMiddlewareFunc(c)` | `httpadapter.MiddlewareFunc(c)` |
+> | `i18n.SimpleMiddleware()` | `httpadapter.SimpleMiddleware()` |
+> | `i18n.DetectFromRequest(r)` | `httpadapter.Detect(r)` |
+> | `detector.DetectFromRequest(r)` | `httpadapter.DetectWith(detector, r)` |
+> | `i18n.RequestSourceOf(r)` | `httpadapter.RequestSourceOf(r)` |
+> | `i18n.SetLanguageInRequest(r, lang)` | `httpadapter.SetLanguage(r, lang)` |
+> | `i18n.LanguageFromRequest(r)` | `httpadapter.Language(r)` |
+> | `i18n.TFromRequest(r, key)` | `httpadapter.T(r, key)` |
+> | `i18n.TfFromRequest(r, key, args...)` | `httpadapter.Tf(r, key, args...)` |
+> | `mode.HTTPSameSite()` | `httpadapter.SameSite(mode)` |
+> | `MiddlewareConfig.NextStd` | `httpadapter.Config.Next` |
 >
-> `MiddlewareConfig.Next` 也跟着搬了：一个 `func(fiber.Ctx) bool` 字段正是把
-> Fiber 拖进根包的原因，现在它在 `fiberadapter.Config` 上，该结构体内嵌
-> `i18n.MiddlewareConfig`。`NextStd` 与 net/http 一侧没有任何变化。
+> `MiddlewareConfig.NextStd` 搬家的理由，和 v3 里 `Next` 搬去 `fiberadapter.Config`
+> 是同一个：一个 `func(*http.Request) bool` 字段正是把 net/http 拽进根包的东西。
+> `httpadapter.Config` 内嵌 `i18n.MiddlewareConfig` 再加一个 `Next`，与
+> `fiberadapter.Config` 完全对称。
 >
-> 顺带修掉一个行为缺陷：`TfFromFiber` 把参数整个丢掉，于是 `"%s"` 在 Fiber 侧
-> 原样输出，而 `TfFromContext` 是正常格式化的。`fiberadapter.Tf` 会格式化。
+> **第三步 —— 用 YAML 翻译文件的人。** `LoadYAML` 与 `LoadYAMLFile` 移到了
+> `github.com/soulteary/i18n-kit/v4/yamlloader`：把一个 YAML 解析器放在根包里，
+> 账是每个程序都要付的，包括翻译文件全是 JSON 的那大多数 —— 而 JSON 标准库本来就读。
 >
-> **两个配置布尔字段被改名，使其零值就是文档中写的默认值。**
-> 它们原本都是正向 bool，无法与「没设置」区分，于是各自打了个会误伤的补丁：
+> | 改之前 | 改之后 |
+> |---|---|
+> | `bundle.LoadYAML(lang, data)` | `yamlloader.Load(bundle, lang, data)` |
+> | `bundle.LoadYAMLFile(lang, path)` | `yamlloader.LoadFile(bundle, lang, path)` |
+> | `bundle.LoadDirectory(dir)`（目录里有 .yaml/.yml） | `yamlloader.LoadDirectory(bundle, dir)` |
 >
-> | 原来 | 现在 | 原因 |
-> |---|---|---|
-> | `DetectorConfig.AcceptLanguage bool`（默认 `true`） | `DisableAcceptLanguage bool` | `NewDetector(DetectorConfig{})` 会保留默认 `Priority` 里的 `"accept"`，却把这一步关着，于是 Accept-Language 被静默忽略 |
-> | `MiddlewareConfig.CookieHTTPOnly bool`（默认 `true`） | `DisableCookieHTTPOnly bool` | 只有在同时设了 `CookieName` 或 `CookieSameSite` 时才会采用你的值，于是「只改个 cookie 名字」会静默清掉 `HttpOnly` |
+> **`Bundle.LoadDirectory` 现在只读 `.json`。** 目录里出现 `.yaml` 或 `.yml` 时它会
+> 返回一个点名 `yamlloader.LoadDirectory` 的错误，而不是默默只加载一半 —— 这是本次
+> 唯一的行为变化，而且是刻意吵的。纯 JSON 的目录不受影响。
 >
-> 无论你原先设的是 `true` 还是 `false`，改名都会产生编译错误，而不是静默改变行为。
+> **两样都不用的话，第二、三步可以跳过。** Bundle、`Translator`、`Detector`、
+> `RequestSource`、context helper、`MiddlewareConfig`、`ResolveMiddlewareConfig`、
+> `ResolveCookieSameSite`，以及所有格式化与复数函数都留在根包，签名与 v3 一致。
+> `fiberadapter` 只有 import 路径要改。
 >
-> **`CookieSameSite` 现在只在一处解析** —— `ResolveCookieSameSite` —— 不再每个框架各解析一遍。
-> 大小写不敏感，`"disabled"` 表示不输出该属性，无法识别的值一律按 `"Lax"` 处理，
-> `"None"` 会强制打开 `Secure`。此前 `"strict"` 在 Fiber 侧是 `Strict`、在 net/http 侧却是 `Lax`；
-> 且 net/http 侧的 `SameSite=None` **不带 `Secure`**，会被浏览器直接丢弃 —— 那个 cookie 从未被存下来过。
+> → **[升级说明（v4.0.0）](#升级说明v400)**
 
 ## 特性
 
 - **多语言支持**：内置支持 10+ 种语言（EN, ZH, FR, DE, JA, KO, IT, ES, PT, RU）
 - **语言检测**：自动从查询参数、Cookie、Header 和 Accept-Language 检测语言
 - **翻译包**：线程安全的翻译管理，支持回退机制
-- **不绑定框架**：内置 net/http 中间件，Fiber v3 在子包中，其他任何框架约 20 行即可接入 —— 检测面向的是一个三方法接口
-- **用到才付出代价**：根包只有一个非 stdlib 依赖（`gopkg.in/yaml.v3`）；Fiber 和 fasthttp 仅在你导入 `fiberadapter` 时才会被链接
+- **不绑定框架**：net/http 在 `httpadapter`，Fiber v3 在 `fiberadapter`，其他任何框架约 20 行即可接入 —— 检测面向的是一个三方法接口
+- **用到才付出代价**：根包不依赖标准库之外的任何东西，连 `net/http` 都不导入 —— Web 服务器、Fiber、YAML 解析器各自待在自己的子包后面
 - **上下文集成**：从 context 存取语言信息
 - **命名参数**：支持 `{name}` 风格的参数替换
 - **复数形式**：简单的复数形式处理
-- **文件加载**：从 JSON 或 YAML 文件加载翻译
+- **文件加载**：JSON 开箱即用；YAML 经由 `yamlloader` 子包
 
 ## 环境要求
 
 - **Go 1.27+**（`go.mod` 声明 `go 1.27.0`）
-- Fiber 中间件需要 `github.com/gofiber/fiber/v3` v3.4.0+
+- `github.com/gofiber/fiber/v3` v3.4.0+ —— 只有 `fiberadapter` 子包需要
+- `gopkg.in/yaml.v3` —— 只有 `yamlloader` 子包需要
+- `httpadapter` 子包与根包只需要标准库
 
-v3 模块线面向 Fiber v3，且只有 `fiberadapter` 子包会链接它。
+v4 模块线面向 Fiber v3，且只有 `fiberadapter` 子包会链接它。
 仍在 Fiber v2 上的应用请继续使用 `github.com/soulteary/i18n-kit` v1。
 
 ## 安装
 
 ```bash
-go get github.com/soulteary/i18n-kit/v3
+go get github.com/soulteary/i18n-kit/v4
+```
+
+根包不依赖标准库之外的任何东西，连 `net/http` 都不依赖。需要依赖的部分都在各自的
+子包里，二进制只链接它真正用到的那些：
+
+```bash
+# net/http 中间件与 *http.Request helper —— 只用标准库
+go get github.com/soulteary/i18n-kit/v4/httpadapter
+
+# YAML 翻译文件 —— 会链接 gopkg.in/yaml.v3
+go get github.com/soulteary/i18n-kit/v4/yamlloader
+
+# Fiber v3 中间件 —— 会链接 Fiber，连带 fasthttp
+go get github.com/soulteary/i18n-kit/v4/fiberadapter
 ```
 
 Fiber 集成要求 Fiber v3.4.0 或更高版本。仍使用 Fiber v2 的应用应继续使用 `github.com/soulteary/i18n-kit` v1。
@@ -91,7 +126,7 @@ package main
 
 import (
     "fmt"
-    i18n "github.com/soulteary/i18n-kit/v3"
+    i18n "github.com/soulteary/i18n-kit/v4"
 )
 
 func main() {
@@ -121,7 +156,8 @@ package main
 
 import (
     "net/http"
-    i18n "github.com/soulteary/i18n-kit/v3"
+    i18n "github.com/soulteary/i18n-kit/v4"
+    "github.com/soulteary/i18n-kit/v4/httpadapter"
 )
 
 func main() {
@@ -136,12 +172,12 @@ func main() {
     // 创建处理器
     handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         // 使用请求中的语言获取翻译
-        greeting := i18n.TFromRequest(r, "greeting")
+        greeting := httpadapter.T(r, "greeting")
         w.Write([]byte(greeting))
     })
 
     // 应用中间件
-    http.Handle("/", i18n.StdMiddleware()(handler))
+    http.Handle("/", httpadapter.Middleware()(handler))
     http.ListenAndServe(":8080", nil)
 }
 ```
@@ -159,8 +195,8 @@ package main
 
 import (
     "github.com/gofiber/fiber/v3"
-    i18n "github.com/soulteary/i18n-kit/v3"
-    "github.com/soulteary/i18n-kit/v3/fiberadapter"
+    i18n "github.com/soulteary/i18n-kit/v4"
+    "github.com/soulteary/i18n-kit/v4/fiberadapter"
 )
 
 func main() {
@@ -221,7 +257,7 @@ detector := i18n.NewDetector(config)
 
 ```go
 lang := detector.DetectFromRequest(r)             // net/http
-lang := detector.Detect(i18n.RequestSourceOf(r))  // 同一件事的显式写法
+lang := detector.Detect(httpadapter.RequestSourceOf(r))  // 同一件事的显式写法
 lang := detector.Detect(mySource)                 // 任意 i18n.RequestSource
 ```
 
@@ -252,7 +288,7 @@ bundle.AddTranslations(i18n.LangFR, map[string]string{
 bundle.LoadJSONFile(i18n.LangEN, "locales/en.json")
 
 // 从 YAML 加载
-bundle.LoadYAMLFile(i18n.LangZH, "locales/zh.yaml")
+yamlloader.LoadFile(bundle, i18n.LangZH, "locales/zh.yaml")
 
 // 加载整个目录
 // 文件命名: en.json, zh.yaml, fr.json 等
@@ -359,7 +395,7 @@ i18n.Tf("greeting", "Alice", 30)
 i18n.TfWithLang(i18n.LangZH, "greeting", "Alice", 30)
 
 // 请求级与上下文级
-i18n.TfFromRequest(r, "greeting", "Alice", 30)
+httpadapter.Tf(r, "greeting", "Alice", 30)
 i18n.TfFromContext(ctx, "greeting", "Alice", 30)
 i18n.TfFromContextWithBundle(ctx, "greeting", "Alice", 30)
 fiberadapter.Tf(c, "greeting", "Alice", 30)
@@ -431,10 +467,10 @@ translation := i18n.TFromContext(ctx, "greeting")
 ```go
 func handler(w http.ResponseWriter, r *http.Request) {
     // 从请求上下文获取语言
-    lang := i18n.LanguageFromRequest(r)
+    lang := httpadapter.Language(r)
     
     // 获取翻译
-    greeting := i18n.TFromRequest(r, "greeting")
+    greeting := httpadapter.T(r, "greeting")
 }
 ```
 
@@ -489,8 +525,8 @@ config := fiberadapter.Config{
 }
 
 // net/http
-config := i18n.MiddlewareConfig{
-    NextStd: func(r *http.Request) bool {
+config := httpadapter.Config{
+    Next: func(r *http.Request) bool {
         return r.URL.Path == "/api/internal"
     },
 }
@@ -518,7 +554,7 @@ type RequestSource interface {
 | 套用配置默认值与合并规则 | `i18n.ResolveMiddlewareConfig(cfg...)` |
 | 解析 `CookieSameSite` | `i18n.ResolveCookieSameSite(value)` |
 | 正确实现 `Tf` | `bundle.LookupTranslation(...)` + `i18n.FormatTranslation(...)` |
-| 适配 `*http.Request` | `i18n.RequestSourceOf(r)` |
+| 适配 `*http.Request` | `httpadapter.RequestSourceOf(r)` |
 | 就"结果存哪里"达成一致 | `i18n.LocalsLanguageKey`、`i18n.LocalsBundleKey` |
 
 一个完整的适配器，以 Echo 为例：
@@ -530,7 +566,8 @@ import (
     "net/http"
 
     "github.com/labstack/echo/v4"
-    i18n "github.com/soulteary/i18n-kit/v3"
+    i18n "github.com/soulteary/i18n-kit/v4"
+    "github.com/soulteary/i18n-kit/v4/httpadapter"
 )
 
 type Source struct{ C echo.Context }
@@ -569,7 +606,7 @@ func Middleware(config ...i18n.MiddlewareConfig) echo.MiddlewareFunc {
                     Secure:   cfg.CookieSecure || mode.RequiresSecure(),
                     HttpOnly: !cfg.DisableCookieHTTPOnly,
                 }
-                if sameSite, ok := mode.HTTPSameSite(); ok {
+                if sameSite, ok := httpadapter.SameSite(mode); ok {
                     cookie.SameSite = sameSite
                 }
                 c.SetCookie(cookie)
@@ -656,6 +693,63 @@ i18n.AddLanguageAlias("ar-EG", i18n.Language("ar"))
 - `Bundle`：支持并发读写
 - `Translator`：支持并发使用
 - 全局函数：使用互斥锁保护
+
+## 升级说明（v4.0.0）
+
+这是一份机械式清单；每条背后的原因见本文件顶部的说明。
+
+1. **改 import path** 为 `github.com/soulteary/i18n-kit/v4`，每个文件都要改：
+
+   ```bash
+   go get github.com/soulteary/i18n-kit/v4
+   go mod edit -droprequire github.com/soulteary/i18n-kit/v3
+   ```
+
+   `go get -u` 不会帮你做这件事；v3 停留在 `v3.0.0`。
+
+2. **把 net/http 入口改指向** `github.com/soulteary/i18n-kit/v4/httpadapter`
+   —— 顶部说明里的表格列全了这十一个。名字去掉了包名已经表达的那部分：
+   `StdMiddleware` 成了 `httpadapter.Middleware`，`LanguageFromRequest` 成了
+   `httpadapter.Language`，与 `fiberadapter` 对称。
+
+3. **把 `MiddlewareConfig.NextStd` 移到** `httpadapter.Config` 上，该结构体内嵌
+   `i18n.MiddlewareConfig`，与 `fiberadapter.Config` 处理 Fiber 的 `Next` 完全一样：
+
+   ```diff
+   -config := i18n.MiddlewareConfig{
+   -    NextStd: skip,
+   -}
+   -handler = i18n.StdMiddleware(config)(handler)
+   +config := httpadapter.Config{
+   +    MiddlewareConfig: i18n.MiddlewareConfig{ /* ... */ },
+   +    Next:             skip,
+   +}
+   +handler = httpadapter.Middleware(config)(handler)
+   ```
+
+4. **把 YAML 加载改指向** `github.com/soulteary/i18n-kit/v4/yamlloader`：
+
+   ```diff
+   -err := bundle.LoadYAMLFile(i18n.LangZH, "locales/zh.yaml")
+   +err := yamlloader.LoadFile(bundle, i18n.LangZH, "locales/zh.yaml")
+   ```
+
+   **如果你加载的是一个含 YAML 的目录，这一条不会编译报错。**
+   `Bundle.LoadDirectory` 仍然存在、仍然能编译；它现在只读 `.json`，遇到 `.yaml`
+   或 `.yml` 会返回一个点名 `yamlloader.LoadDirectory` 的错误。之所以让它吵，正是
+   因为翻译只加载了一半这件事在有人报告「页面上一堆没翻译的 key」之前是看不见的。
+   纯 JSON 的目录不受影响。
+
+   `LoadDirectoryWith` 是新增的，把它认识的扩展名作为 `map[string]i18n.Decoder`
+   传进来 —— `yamlloader.LoadDirectory` 就是这样在不让根包 import YAML 库的前提下
+   加上 YAML 的。想要 TOML 或 `.properties` 的话，二十行，这边一行都不用改。
+
+5. **net/http 和 YAML 都不用的话，第 2 到 4 步都不适用。** Bundle、`Translator`、
+   `Detector`、`RequestSource`、context helper、`MiddlewareConfig`、
+   `ResolveMiddlewareConfig`、`ResolveCookieSameSite`，以及所有格式化与复数函数，
+   签名都与 v3 一致地留在根包。`fiberadapter` 的用户只有 import 路径要改。
+
+除此之外没有任何变化：检测规则、Cookie 属性、格式化行为、翻译输出都一样。
 
 ## 升级说明（v3.0.0）
 

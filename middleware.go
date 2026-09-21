@@ -1,9 +1,5 @@
 package i18n
 
-import (
-	"net/http"
-)
-
 // MiddlewareConfig configures the i18n middleware.
 type MiddlewareConfig struct {
 	// Detector is the language detector to use.
@@ -55,10 +51,6 @@ type MiddlewareConfig struct {
 	//
 	// Default: "Lax"
 	CookieSameSite string
-
-	// NextStd defines a function to skip middleware for net/http when true.
-	// Default: nil
-	NextStd func(r *http.Request) bool
 }
 
 // DefaultMiddlewareConfig returns the default middleware configuration.
@@ -72,7 +64,6 @@ func DefaultMiddlewareConfig() MiddlewareConfig {
 		CookiePath:     "/",
 		CookieSecure:   false,
 		CookieSameSite: "Lax",
-		NextStd:        nil,
 	}
 }
 
@@ -136,76 +127,6 @@ func mergeConfig(defaults, user MiddlewareConfig) MiddlewareConfig {
 	if user.CookieSameSite != "" {
 		result.CookieSameSite = user.CookieSameSite
 	}
-	if user.NextStd != nil {
-		result.NextStd = user.NextStd
-	}
 
 	return result
-}
-
-// StdMiddleware creates a net/http middleware for language detection.
-func StdMiddleware(config ...MiddlewareConfig) func(http.Handler) http.Handler {
-	cfg := ResolveMiddlewareConfig(config...)
-
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip middleware if NextStd returns true
-			if cfg.NextStd != nil && cfg.NextStd(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Detect language
-			lang := cfg.Detector.DetectFromRequest(r)
-
-			// Store in context
-			ctx := ContextWithLanguage(r.Context(), lang)
-
-			// Store bundle if provided
-			if cfg.Bundle != nil {
-				ctx = ContextWithBundle(ctx, cfg.Bundle)
-			}
-
-			// Update request with new context
-			r = r.WithContext(ctx)
-
-			// Set cookie if configured
-			if cfg.SetCookie {
-				mode := ResolveCookieSameSite(cfg.CookieSameSite)
-
-				cookie := &http.Cookie{
-					Name:     cfg.CookieName,
-					Value:    string(lang),
-					MaxAge:   cfg.CookieMaxAge,
-					Path:     cfg.CookiePath,
-					Secure:   cfg.CookieSecure || mode.RequiresSecure(),
-					HttpOnly: !cfg.DisableCookieHTTPOnly,
-				}
-				// A zero SameSite writes no attribute, which is what
-				// SameSiteDisabled asks for.
-				if sameSite, ok := mode.HTTPSameSite(); ok {
-					cookie.SameSite = sameSite
-				}
-
-				http.SetCookie(w, cookie)
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// StdMiddlewareFunc creates a net/http middleware function for language detection.
-// This is useful when you need to wrap a http.HandlerFunc directly.
-func StdMiddlewareFunc(config ...MiddlewareConfig) func(http.HandlerFunc) http.HandlerFunc {
-	middleware := StdMiddleware(config...)
-	return func(next http.HandlerFunc) http.HandlerFunc {
-		return middleware(next).ServeHTTP
-	}
-}
-
-// SimpleMiddleware creates a simple middleware that only detects language.
-// This is a convenience function for the common use case.
-func SimpleMiddleware() func(http.Handler) http.Handler {
-	return StdMiddleware(DefaultMiddlewareConfig())
 }
