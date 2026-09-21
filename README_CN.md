@@ -192,22 +192,40 @@ func main() {
 
 ```go
 config := i18n.DetectorConfig{
-    QueryParam:     "lang",           // 查询参数名
-    CookieName:     "lang",           // Cookie 名
-    HeaderName:     "X-Language",     // 自定义 Header 名
-    AcceptLanguage: true,             // 解析 Accept-Language
-    Priority:       []string{"query", "cookie", "header", "accept"},
-    Default:        i18n.LangEN,      // 回退语言
+    QueryParam: "lang",           // 查询参数名
+    CookieName: "lang",           // Cookie 名
+    HeaderName: "X-Language",     // 自定义 Header 名
+    Priority:   []string{"query", "cookie", "header", "accept"},
+    Default:    i18n.LangEN,      // 回退语言
+
+    // DisableAcceptLanguage: true,  // 关闭 Accept-Language 解析
 }
 
 detector := i18n.NewDetector(config)
 ```
+
+上面每个字段的零值都是可用的，因此 `i18n.DetectorConfig{}` 的行为与
+`i18n.DefaultDetectorConfig()` 完全一致 —— 只写你要改的那几项即可。
 
 检测优先级（默认顺序）：
 1. 查询参数 (`?lang=zh`)
 2. Cookie (`lang=zh`)
 3. 自定义 Header (`X-Language: zh`)
 4. Accept-Language Header (`Accept-Language: zh-CN,zh;q=0.9`)
+
+从 `Priority` 中去掉某个方式即完全跳过它 —— 那一项根本不会被读取。
+`DisableAcceptLanguage` 是最后一步的独立开关，所以你可以保留列表里的
+`"accept"`、同时把解析关掉。
+
+检测器面向的是"能回答三个问题"的任何东西，不限于 `*http.Request`：
+
+```go
+lang := detector.DetectFromRequest(r)             // net/http
+lang := detector.Detect(i18n.RequestSourceOf(r))  // 同一件事的显式写法
+lang := detector.Detect(mySource)                 // 任意 i18n.RequestSource
+```
+
+参见[适配其他框架](#适配其他框架)。
 
 ## 翻译包
 
@@ -444,6 +462,22 @@ config := fiberadapter.Config{
 app.Use(fiberadapter.Middleware(config))
 ```
 
+与 `DetectorConfig` 一样，每个字段的零值都可用：`SetCookie` 默认关闭；
+开启后 cookie 默认带 `HttpOnly`，除非你设置 `DisableCookieHTTPOnly`。
+
+`CookieSameSite` 只在一处解析 —— `i18n.ResolveCookieSameSite` —— 因此所有框架读到的含义一致：
+
+| 取值 | 结果 |
+|---|---|
+| `"Lax"`（默认） | `SameSite=Lax` |
+| `"Strict"` | `SameSite=Strict` |
+| `"None"` | `SameSite=None`，并强制打开 `Secure` |
+| `"disabled"` | 完全不输出 `SameSite` 属性 |
+| 其他任意值 | `Lax` |
+
+匹配不区分大小写，首尾空白会被忽略。`"None"` 之所以强制 `Secure`，是因为浏览器
+拒收不带 `Secure` 的该组合 —— 那个 cookie 根本不会被存下来。
+
 ### 跳过特定路径
 
 ```go
@@ -461,6 +495,123 @@ config := i18n.MiddlewareConfig{
     },
 }
 ```
+
+## 适配其他框架
+
+检测是一条链，架在一个三方法接口之上。因此为 Echo、Gin、chi 或任何其他框架写适配器，
+要做的只是说明查询参数、cookie 和 header 分别从哪里取：
+
+```go
+type RequestSource interface {
+    Query(name string) string
+    Cookie(name string) string
+    Header(name string) string
+}
+```
+
+其余一切 —— 优先级顺序、配置默认值与合并规则、`SameSite` 规则、`Tf` 的缺失 key 规则 ——
+都从根包读取而不是重新实现一遍，这样新适配器不会与内置的那些产生分歧：
+
+| 你需要 | 调用 |
+|---|---|
+| 跑检测链 | `detector.Detect(src)` |
+| 套用配置默认值与合并规则 | `i18n.ResolveMiddlewareConfig(cfg...)` |
+| 解析 `CookieSameSite` | `i18n.ResolveCookieSameSite(value)` |
+| 正确实现 `Tf` | `bundle.LookupTranslation(...)` + `i18n.FormatTranslation(...)` |
+| 适配 `*http.Request` | `i18n.RequestSourceOf(r)` |
+| 就"结果存哪里"达成一致 | `i18n.LocalsLanguageKey`、`i18n.LocalsBundleKey` |
+
+一个完整的适配器，以 Echo 为例：
+
+```go
+package echoadapter
+
+import (
+    "net/http"
+
+    "github.com/labstack/echo/v4"
+    i18n "github.com/soulteary/i18n-kit/v3"
+)
+
+type Source struct{ C echo.Context }
+
+func (s Source) Query(name string) string { return s.C.QueryParam(name) }
+
+func (s Source) Cookie(name string) string {
+    cookie, err := s.C.Cookie(name)
+    if err != nil {
+        return ""
+    }
+    return cookie.Value
+}
+
+func (s Source) Header(name string) string { return s.C.Request().Header.Get(name) }
+
+func Middleware(config ...i18n.MiddlewareConfig) echo.MiddlewareFunc {
+    cfg := i18n.ResolveMiddlewareConfig(config...)
+
+    return func(next echo.HandlerFunc) echo.HandlerFunc {
+        return func(c echo.Context) error {
+            lang := cfg.Detector.Detect(Source{C: c})
+            c.Set(i18n.LocalsLanguageKey, lang)
+
+            if cfg.Bundle != nil {
+                c.Set(i18n.LocalsBundleKey, cfg.Bundle)
+            }
+
+            if cfg.SetCookie {
+                mode := i18n.ResolveCookieSameSite(cfg.CookieSameSite)
+                cookie := &http.Cookie{
+                    Name:     cfg.CookieName,
+                    Value:    string(lang),
+                    MaxAge:   cfg.CookieMaxAge,
+                    Path:     cfg.CookiePath,
+                    Secure:   cfg.CookieSecure || mode.RequiresSecure(),
+                    HttpOnly: !cfg.DisableCookieHTTPOnly,
+                }
+                if sameSite, ok := mode.HTTPSameSite(); ok {
+                    cookie.SameSite = sameSite
+                }
+                c.SetCookie(cookie)
+            }
+
+            return next(c)
+        }
+    }
+}
+
+func Language(c echo.Context) i18n.Language {
+    if lang, ok := c.Get(i18n.LocalsLanguageKey).(i18n.Language); ok {
+        return lang
+    }
+    return i18n.DefaultLanguage
+}
+
+func Bundle(c echo.Context) *i18n.Bundle {
+    if bundle, ok := c.Get(i18n.LocalsBundleKey).(*i18n.Bundle); ok {
+        return bundle
+    }
+    return i18n.DefaultBundle
+}
+
+func T(c echo.Context, key string) string {
+    return Bundle(c).GetTranslation(Language(c), key)
+}
+
+func Tf(c echo.Context, key string, args ...interface{}) string {
+    text, found := Bundle(c).LookupTranslation(Language(c), key)
+    return i18n.FormatTranslation(text, found, args...)
+}
+```
+
+`fiberadapter` 是同样的结构，可以作为参考对照阅读。
+
+> **框架的「每请求存储」不是 `context.Context`。**
+> `LocalsLanguageKey` 和 `LocalsBundleKey` 是普通字符串，而本包的 context key
+> 是未导出类型 —— 所以存在 `LocalsLanguageKey` 下的语言**不会**通过
+> `i18n.LanguageFromContext` 读回来，`i18n.TFromContext` 会返回默认语言且不作任何提示。
+> 请用你自己适配器的读取函数；若想让 context 系列函数也能看到，请自行调用
+> `i18n.ContextWithLanguage`。
 
 ## 支持的语言
 
@@ -505,6 +656,38 @@ i18n.AddLanguageAlias("ar-EG", i18n.Language("ar"))
 - `Bundle`：支持并发读写
 - `Translator`：支持并发使用
 - 全局函数：使用互斥锁保护
+
+## 升级说明（v3.0.0）
+
+这是一份机械式清单；每条背后的原因见本文件顶部的说明。
+
+1. **改 import path** 为 `github.com/soulteary/i18n-kit/v3`。正因为路径变了，
+   v2.2.0 原样继续可用 —— 不会有任何东西把你意外升上来。
+2. **把 Fiber 入口改指向** `github.com/soulteary/i18n-kit/v3/fiberadapter`
+   （对照表见顶部说明）。net/http 一侧没有任何迁移。
+3. **把 `MiddlewareConfig.Next` 移到** `fiberadapter.Config` 上，该结构体内嵌
+   `i18n.MiddlewareConfig`。`NextStd` 不变。
+4. **两个布尔字段改名**，留空不写时默认值都是对的：
+
+   | 原来 | 现在 |
+   |---|---|
+   | `DetectorConfig.AcceptLanguage: true` | *（删掉这行即可 —— 这就是默认值）* |
+   | `DetectorConfig.AcceptLanguage: false` | `DisableAcceptLanguage: true` |
+   | `MiddlewareConfig.CookieHTTPOnly: true` | *（删掉这行即可 —— 这就是默认值）* |
+   | `MiddlewareConfig.CookieHTTPOnly: false` | `DisableCookieHTTPOnly: true` |
+
+   旧字段的任何写法都会产生编译错误，因此不会有静默的行为变化。
+
+有两处行为会改变输出：
+
+- **Fiber 侧的 `Tf` 现在会应用参数了。** `TfFromFiber` 原先把参数整个丢掉，于是
+  `"%s"` 原样输出，而 `TfFromContext` 是正常格式化的。`fiberadapter.Tf` 会格式化。
+  **如果你此前通过自行预格式化来绕开这个问题，请移除那段绕行代码。**
+- **`CookieSameSite` 在各处的解析结果完全一致了。** 此前每个中间件各自解析字符串，
+  于是 `"strict"` 在 Fiber 侧是 `Strict`、在 net/http 侧却是 `Lax`；且 net/http 侧发出的
+  `SameSite=None` **不带 `Secure`** —— 这个组合会被浏览器拒收，那个 cookie 从未被存下来过。
+  现在匹配不区分大小写，`"disabled"` 不输出该属性，`"None"` 强制 `Secure`。
+  **如果你依赖过「小写值悄悄等于 `Lax`」这一行为，请改成明确写出你想要的值。**
 
 ## 升级说明（v2.2.0）
 
