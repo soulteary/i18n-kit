@@ -14,6 +14,7 @@
 package httpadapter
 
 import (
+	"context"
 	"net/http"
 
 	i18n "github.com/soulteary/i18n-kit/v4"
@@ -69,11 +70,12 @@ func Language(r *http.Request) i18n.Language {
 }
 
 // T returns the translated string using the language from the request context.
+//
+// A nil request reads as "no language in context", which resolves to
+// i18n.DefaultLanguage -- the same answer Language gives, reached through an
+// empty context rather than a nil one.
 func T(r *http.Request, key string) string {
-	if r == nil {
-		return i18n.TFromContext(nil, key)
-	}
-	return i18n.TFromContext(r.Context(), key)
+	return i18n.TFromContext(requestContext(r), key)
 }
 
 // Tf returns a formatted translated string using the language from the request
@@ -82,10 +84,16 @@ func T(r *http.Request, key string) string {
 // If the key has no translation, the key is returned as-is and the arguments
 // are NOT applied -- the root package decides that, not this one.
 func Tf(r *http.Request, key string, args ...interface{}) string {
+	return i18n.TfFromContext(requestContext(r), key, args...)
+}
+
+// requestContext is r.Context() with nil handled, so the helpers here never
+// hand a nil Context to the root package.
+func requestContext(r *http.Request) context.Context {
 	if r == nil {
-		return i18n.TfFromContext(nil, key, args...)
+		return context.Background()
 	}
-	return i18n.TfFromContext(r.Context(), key, args...)
+	return r.Context()
 }
 
 // SameSite maps a resolved cookie mode to net/http's SameSite value.
