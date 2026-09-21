@@ -1,7 +1,3 @@
-// Package i18n provides internationalization (i18n) support for Go applications.
-// It supports multiple languages, language detection from HTTP requests, and
-// both Fiber and net/http middleware.
-//
 //nolint:misspell // This file contains multi-language translations
 package i18n
 
