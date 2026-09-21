@@ -94,7 +94,7 @@
 
 - **Go 1.27+**（`go.mod` 声明 `go 1.27.0`）
 - `github.com/gofiber/fiber/v3` v3.5.0+ —— 只有 `fiberadapter` 子包需要
-- `gopkg.in/yaml.v3` —— 只有 `yamlloader` 子包需要
+- `go.yaml.in/yaml/v3` —— 只有 `yamlloader` 子包需要
 - `httpadapter` 子包与根包只需要标准库
 
 v4 模块线面向 Fiber v3，且只有 `fiberadapter` 子包会链接它。
@@ -113,7 +113,7 @@ go get github.com/soulteary/i18n-kit/v4
 # net/http 中间件与 *http.Request helper —— 只用标准库
 go get github.com/soulteary/i18n-kit/v4/httpadapter
 
-# YAML 翻译文件 —— 会链接 gopkg.in/yaml.v3
+# YAML 翻译文件 —— 会链接 go.yaml.in/yaml/v3
 go get github.com/soulteary/i18n-kit/v4/yamlloader
 
 # Fiber v3 中间件 —— 会链接 Fiber，连带 fasthttp
@@ -293,7 +293,7 @@ bundle.AddTranslations(i18n.LangFR, map[string]string{
 bundle.LoadJSONFile(i18n.LangEN, "locales/en.json")
 bundle.LoadJSON(i18n.LangEN, data)   // 从字节加载：embed.FS、HTTP 响应体等
 
-// YAML —— 会链接 gopkg.in/yaml.v3，因此放在 yamlloader 子包里
+// YAML —— 会链接 go.yaml.in/yaml/v3，因此放在 yamlloader 子包里
 yamlloader.LoadFile(bundle, i18n.LangZH, "locales/zh.yaml")
 yamlloader.Load(bundle, i18n.LangZH, data)
 
@@ -813,6 +813,31 @@ i18n.AddLanguageAlias("ar-EG", i18n.Language("ar"))
 - `Bundle`：支持并发读写
 - `Translator`：支持并发使用
 - 全局函数：使用互斥锁保护
+
+## 升级说明（v4.0.1）
+
+API 没有任何变化。`yamlloader` 换了一个模块来解析 YAML，`go.mod` 里少了一个依赖。
+
+- **YAML 解析器改为 `go.yaml.in/yaml/v3` v3.0.5。** `gopkg.in/yaml.v3` 上游已归档
+  —— 仓库只读，不会再有任何提交进去，包括修复。`go.yaml.in/yaml/v3` 是它的维护中
+  的延续：包名一样，`yaml.Unmarshal` 一样，解析行为一样。代码里唯一改动的一行就是
+  `yamlloader/yamlloader.go` 里的 import path。
+- **你的代码不需要做任何改动。** `yamlloader` 导出的名字 —— `Decode`、`Load`、
+  `LoadFile`、`LoadDirectory` —— 没有一个在签名里出现 YAML 库的类型，它们只处理
+  `map[string]string` 和 `i18n` 的类型。升级就是一句
+  `go get github.com/soulteary/i18n-kit/v4@v4.0.1`，没有别的。
+- **重复的解析器没有了。** v4.0.0 同时要求两个：`gopkg.in/yaml.v3` v3.0.1 是
+  `yamlloader` 的直接依赖，`go.yaml.in/yaml/v3` v3.0.5 是间接依赖 —— 因为
+  `gofiber/utils/v2` 和 `stretchr/testify` 早就换过去了。同时用到 `yamlloader` 和
+  `fiberadapter` 的构建，会链接同一个解析器的两份副本。现在 `gopkg.in/yaml.v3` 在
+  `go.mod` 和 `go.sum` 里都不存在了。
+- **如果你自己的代码 import 了 `gopkg.in/yaml.v3`，它现在是你的依赖。** v4.0.0 把它
+  列为直接依赖，所以它本来就在你的 module graph 里；v4.0.1 不再列它。Fiber v3.5.0
+  的 `go.mod` 里仍然 require 它，但构建中没有任何包 import 它，所以它不进 build
+  list。这不会悄悄坏掉 —— `go mod tidy` 会把这行加到你的 `go.mod` 里 —— 但这行从
+  此归你维护。
+- **根包依然完全不链接 YAML 解析器。** 这正是 `yamlloader` 存在的意义；
+  `deps_test.go` 里的守卫现在对两个模块路径都会失败，而不只是旧的那个。
 
 ## 升级说明（v4.0.0）
 

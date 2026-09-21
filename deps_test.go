@@ -9,9 +9,9 @@ import (
 // TestRootPackageIsStandardLibraryOnly guards the two splits this package
 // rests on.
 //
-// yamlloader exists because gopkg.in/yaml.v3 was reached from bundle.go, so
-// every program importing this package carried a YAML parser even when all of
-// its translation files were JSON -- which the standard library already reads.
+// yamlloader exists because a YAML parser was reached from bundle.go, so every
+// program importing this package carried one even when all of its translation
+// files were JSON -- which the standard library already reads.
 //
 // httpadapter exists because net/http was reached from four files, and it
 // alone was 122 of the 203 packages the v3 root cost every importer. A CLI
@@ -37,6 +37,7 @@ func TestRootPackageIsStandardLibraryOnly(t *testing.T) {
 
 	banned := map[string]string{
 		"net/http":                    "use the httpadapter subpackage",
+		"go.yaml.in/":                 "use the yamlloader subpackage",
 		"gopkg.in/yaml.v3":            "use the yamlloader subpackage",
 		"github.com/gofiber/":         "use the fiberadapter subpackage",
 		"github.com/valyala/fasthttp": "use the fiberadapter subpackage",
