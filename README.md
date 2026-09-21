@@ -102,7 +102,7 @@ A lightweight, flexible internationalization (i18n) library for Go applications.
 
 - **Go 1.27+** (`go.mod` declares `go 1.27.0`)
 - `github.com/gofiber/fiber/v3` v3.5.0+ — only for the `fiberadapter` subpackage
-- `gopkg.in/yaml.v3` — only for the `yamlloader` subpackage
+- `go.yaml.in/yaml/v3` — only for the `yamlloader` subpackage
 - the `httpadapter` subpackage and the root package need nothing but the standard library
 
 This v4 module line targets Fiber v3, and only the `fiberadapter` subpackage
@@ -123,7 +123,7 @@ binary links only what it actually uses:
 # net/http middleware and *http.Request helpers — standard library only
 go get github.com/soulteary/i18n-kit/v4/httpadapter
 
-# YAML translation files — links gopkg.in/yaml.v3
+# YAML translation files — links go.yaml.in/yaml/v3
 go get github.com/soulteary/i18n-kit/v4/yamlloader
 
 # Fiber v3 middleware — links Fiber, and with it fasthttp
@@ -305,7 +305,7 @@ bundle.AddTranslations(i18n.LangFR, map[string]string{
 bundle.LoadJSONFile(i18n.LangEN, "locales/en.json")
 bundle.LoadJSON(i18n.LangEN, data)   // from bytes: an embed.FS, a response body
 
-// YAML — links gopkg.in/yaml.v3, so it lives in the yamlloader subpackage
+// YAML — links go.yaml.in/yaml/v3, so it lives in the yamlloader subpackage
 yamlloader.LoadFile(bundle, i18n.LangZH, "locales/zh.yaml")
 yamlloader.Load(bundle, i18n.LangZH, data)
 
@@ -849,6 +849,35 @@ All components are thread-safe:
 - `Bundle`: Safe for concurrent reads and writes
 - `Translator`: Safe for concurrent use
 - Global functions: Protected by mutex
+
+## Upgrade Notes (v4.0.1)
+
+No API changed. `yamlloader` parses YAML with a different module, and one
+dependency left `go.mod`.
+
+- **The YAML parser is now `go.yaml.in/yaml/v3` v3.0.5.** `gopkg.in/yaml.v3` is
+  archived upstream — read-only, so nothing lands there again, fixes included.
+  `go.yaml.in/yaml/v3` is its maintained continuation: same package name, same
+  `yaml.Unmarshal`, same parsing behaviour. The import path in
+  `yamlloader/yamlloader.go` is the only line of code that changed.
+- **Nothing to do in your own code.** No exported name in `yamlloader` —
+  `Decode`, `Load`, `LoadFile`, `LoadDirectory` — mentions a type from the YAML
+  library; they deal in `map[string]string` and `i18n` types. Upgrading is
+  `go get github.com/soulteary/i18n-kit/v4@v4.0.1`, and that is all.
+- **The duplicate parser is gone.** v4.0.0 required both of them: `gopkg.in/yaml.v3`
+  v3.0.1 directly for `yamlloader`, and `go.yaml.in/yaml/v3` v3.0.5 indirectly,
+  because `gofiber/utils/v2` and `stretchr/testify` had already moved across. A
+  build using `yamlloader` and `fiberadapter` together linked two copies of the
+  same parser. `gopkg.in/yaml.v3` is now absent from both `go.mod` and `go.sum`.
+- **If your own code imports `gopkg.in/yaml.v3`, it is now your requirement.**
+  v4.0.0 listed it as a direct requirement, so it was already in your module
+  graph; v4.0.1 does not. Fiber v3.5.0 still requires it in its own `go.mod`, but
+  no package in the build imports it, so it stays out of the build list. Nothing
+  breaks silently — `go mod tidy` adds the line to your `go.mod` — but the line
+  is yours now.
+- **The root package still links no YAML parser at all.** That is what
+  `yamlloader` exists for, and the guard in `deps_test.go` now fails on either
+  module path rather than only the old one.
 
 ## Upgrade Notes (v4.0.0)
 

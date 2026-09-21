@@ -5,7 +5,7 @@ go 1.27.0
 require (
 	github.com/gofiber/fiber/v3 v3.5.0
 	github.com/stretchr/testify v1.12.1
-	gopkg.in/yaml.v3 v3.0.1
+	go.yaml.in/yaml/v3 v3.0.5
 )
 
 require (
@@ -20,7 +20,6 @@ require (
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.74.0 // indirect
-	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect

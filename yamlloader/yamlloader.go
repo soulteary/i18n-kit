@@ -3,7 +3,7 @@
 // It lives in its own package so that importing the root package does not pull
 // a YAML library into programs whose translations are all JSON -- which is most
 // of them, since JSON needs nothing but the standard library. Only importing
-// this package links gopkg.in/yaml.v3.
+// this package links go.yaml.in/yaml/v3.
 //
 // It adds no behaviour of its own: Load is Bundle.LoadJSON's counterpart,
 // LoadDirectory is Bundle.LoadDirectory with two more extensions, and the
@@ -16,7 +16,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	i18n "github.com/soulteary/i18n-kit/v4"
 )
