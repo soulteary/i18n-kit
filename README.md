@@ -6,8 +6,6 @@
 [![Coverage](https://codecov.io/gh/soulteary/i18n-kit/branch/main/graph/badge.svg)](https://codecov.io/gh/soulteary/i18n-kit)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-[中文文档](README_CN.md)
-
 A lightweight, flexible internationalization (i18n) library for Go applications. Supports language detection from HTTP requests, translation bundles, and middleware for both Fiber and net/http.
 
 [中文文档](README_CN.md)
@@ -81,6 +79,11 @@ A lightweight, flexible internationalization (i18n) library for Go applications.
 > pluralization function stayed in the root package with their v3 signatures.
 > `fiberadapter` changes only its import path.
 >
+> **One root-package signature did change:** `Formatter.FormatWithContext` now
+> takes a `context.Context` instead of an `interface{}`. It never worked through
+> the old one -- the type switch it used matched nothing, so every call
+> formatted in `DefaultLanguage` -- see step 5 of the upgrade notes.
+>
 > → **[Upgrade Notes (v4.0.0)](#upgrade-notes-v400)**
 
 ## Features
@@ -98,7 +101,7 @@ A lightweight, flexible internationalization (i18n) library for Go applications.
 ## Requirements
 
 - **Go 1.27+** (`go.mod` declares `go 1.27.0`)
-- `github.com/gofiber/fiber/v3` v3.4.0+ — only for the `fiberadapter` subpackage
+- `github.com/gofiber/fiber/v3` v3.5.0+ — only for the `fiberadapter` subpackage
 - `gopkg.in/yaml.v3` — only for the `yamlloader` subpackage
 - the `httpadapter` subpackage and the root package need nothing but the standard library
 
@@ -127,7 +130,7 @@ go get github.com/soulteary/i18n-kit/v4/yamlloader
 go get github.com/soulteary/i18n-kit/v4/fiberadapter
 ```
 
-Fiber integrations require Fiber v3.4.0 or later. Applications that still use Fiber v2 should remain on `github.com/soulteary/i18n-kit` v1.
+Fiber integrations require Fiber v3.5.0 or later — the version `go.mod` requires. Applications that still use Fiber v2 should remain on `github.com/soulteary/i18n-kit` v1.
 
 ## Quick Start
 
@@ -298,16 +301,45 @@ bundle.AddTranslations(i18n.LangFR, map[string]string{
 ### Loading from Files
 
 ```go
-// Load from JSON
+// JSON — standard library only, no extra dependency
 bundle.LoadJSONFile(i18n.LangEN, "locales/en.json")
+bundle.LoadJSON(i18n.LangEN, data)   // from bytes: an embed.FS, a response body
 
-// Load from YAML
+// YAML — links gopkg.in/yaml.v3, so it lives in the yamlloader subpackage
 yamlloader.LoadFile(bundle, i18n.LangZH, "locales/zh.yaml")
+yamlloader.Load(bundle, i18n.LangZH, data)
 
-// Load entire directory
-// Files should be named: en.json, zh.yaml, fr.json, etc.
-bundle.LoadDirectory("locales/")
+// A whole directory, its files named en.json, zh.yaml, fr.json, …
+bundle.LoadDirectory("locales/")               // .json only
+yamlloader.LoadDirectory(bundle, "locales/")   // .json, .yaml and .yml
 ```
+
+`Bundle.LoadDirectory` reads **only `.json`**. A directory holding `.yaml` or
+`.yml` returns an error naming `yamlloader.LoadDirectory` rather than silently
+loading half the translations. `yamlloader.LoadDirectory` keeps `.json`
+included, so renaming one file to `.yaml` does not stop the rest from loading.
+
+#### Teaching the loader another format
+
+A `Decoder` turns one file's bytes into a flat map, which is how the root
+package loads formats it links no parser for:
+
+```go
+type Decoder func(data []byte) (map[string]string, error)
+```
+
+`LoadDirectoryWith` takes the extensions it should understand:
+
+```go
+bundle.LoadDirectoryWith("locales/", map[string]i18n.Decoder{
+    ".json": i18n.DecodeJSON,   // what LoadDirectory uses
+    ".yaml": yamlloader.Decode, // what yamlloader.LoadDirectory adds
+    ".toml": myTOMLDecoder,     // anything else, same three-line shape
+})
+```
+
+This is exactly how `yamlloader.LoadDirectory` supports YAML without the root
+package importing a YAML parser — and the same seam is open to your own formats.
 
 ### Managing a Bundle
 
@@ -337,6 +369,37 @@ lang := i18n.GetGlobalLanguage()
 
 Prefer the request- and context-scoped variants in a server; a global is a
 single value shared by every concurrent request.
+
+`i18n.TWithLang` / `i18n.TfWithLang` name the language per call and read no
+global at all, which is the simplest way to avoid that sharing:
+
+```go
+i18n.TWithLang(i18n.LangZH, "greeting")              // "你好，世界！"
+i18n.TfWithLang(i18n.LangZH, "greeting", "Alice")
+```
+
+### Scoped Translators
+
+A `Translator` binds a bundle to a current language, so nothing is shared with
+the rest of the process:
+
+```go
+translator := i18n.NewTranslator(bundle)                           // starts at DefaultLanguage
+translator = i18n.NewTranslatorWithLanguage(bundle, i18n.LangZH)   // or start somewhere else
+
+translator.SetLanguage(i18n.LangFR)
+translator.GetLanguage()                        // "fr"
+translator.Bundle()                             // the bundle it was built with
+
+translator.T("greeting")                        // in the translator's language
+translator.Tf("greeting", "Alice")
+translator.TWithLang(i18n.LangZH, "greeting")   // overriding it for one call
+translator.TfWithLang(i18n.LangZH, "greeting", "Alice")
+```
+
+`i18n.GlobalTranslator` is the package-level one backing `T`/`Tf`. It is a
+shared value, so prefer your own translator, or the context helpers below, over
+mutating it.
 
 ### Translation Fallback
 
@@ -372,6 +435,10 @@ result := formatter.Format(i18n.LangEN, "welcome", map[string]any{
 // Or package-level, against DefaultBundle
 result = i18n.Format(i18n.LangEN, "welcome", map[string]any{"name": "Alice", "count": 5})
 ```
+
+`i18n.Format` and `i18n.Pluralize` are thin wrappers over `i18n.DefaultFormatter`,
+the `*Formatter` built on `DefaultBundle`. Construct your own with `NewFormatter`
+whenever the translations are not the process-wide ones.
 
 Substitution is a **single pass over the template**, which gives two guarantees
 worth relying on:
@@ -482,9 +549,43 @@ usual, and `{count}` is always available.
 ctx := i18n.ContextWithLanguage(context.Background(), i18n.LangZH)
 
 // Later in your code
-lang := i18n.LanguageFromContext(ctx)
+lang := i18n.LanguageFromContext(ctx)          // DefaultLanguage when absent
+lang, ok := i18n.LanguageFromContextOK(ctx)    // ("", false) when absent
 translation := i18n.TFromContext(ctx, "greeting")
+formatted := i18n.TfFromContext(ctx, "greeting", "Alice")
 ```
+
+Use `LanguageFromContextOK` when "no language in this context" has to be told
+apart from "the default language" — `LanguageFromContext` collapses the two.
+
+### Carrying a Bundle in the Context
+
+The context can hold a bundle as well as a language, which is what a server
+serving several tenants — each with its own translations — needs:
+
+```go
+ctx = i18n.ContextWithBundle(ctx, tenantBundle)
+
+bundle := i18n.BundleFromContext(ctx)                  // DefaultBundle when absent
+text := i18n.TFromContextWithBundle(ctx, "greeting")
+text = i18n.TfFromContextWithBundle(ctx, "greeting", "Alice")
+```
+
+The `WithBundle` variants read the bundle from the context; the plain
+`TFromContext` / `TfFromContext` always read `DefaultBundle`. `httpadapter`'s
+middleware stores both values, so a handler's `r.Context()` carries whichever
+bundle the config set.
+
+A `Formatter` resolves the language from a context too:
+
+```go
+formatter.FormatWithContext(r.Context(), "welcome", map[string]any{"name": "Alice"})
+```
+
+It formats against the formatter's *own* bundle — `ContextWithBundle` does not
+override that — and falls back to `DefaultLanguage` when the context carries no
+language. Fiber keeps the language in `Locals` rather than in a context: read it
+with `fiberadapter.Language(c)` and call `Format` directly.
 
 ### With http.Request
 
@@ -540,6 +641,25 @@ and when it is on the cookie is `HttpOnly` unless you set
 Matching is case-insensitive and surrounding whitespace is ignored. `"None"`
 forces `Secure` because browsers reject the combination without it — the cookie
 would simply never be stored.
+
+`ResolveCookieSameSite` returns an `i18n.CookieSameSiteMode` — one of
+`SameSiteLax`, `SameSiteStrict`, `SameSiteNone` and `SameSiteDisabled` — and
+`mode.RequiresSecure()` reports the `SameSiteNone` case an adapter has to honour.
+`httpadapter.SameSite(mode)` converts it to the `http.SameSite` constant
+net/http wants:
+
+```go
+mode := i18n.ResolveCookieSameSite(cfg.CookieSameSite)   // i18n.SameSiteLax
+if mode.RequiresSecure() {
+    cookie.Secure = true
+}
+sameSite, write := httpadapter.SameSite(mode)            // write is false for "disabled"
+```
+
+`i18n.DefaultMiddlewareConfig()` returns the defaults these fields fall back to,
+and `i18n.ResolveMiddlewareConfig(cfg...)` is what every adapter runs a caller's
+config through — use it when adapting a framework of your own, so the defaults
+stay in one place.
 
 ### Skip Middleware for Specific Paths
 
@@ -704,7 +824,13 @@ lang := i18n.NormalizeLanguage("en-US")        // "en"
 lang, ok := i18n.ParseLanguage("zh-Hans")      // ("zh", true)
 i18n.LangEN.IsValid()                          // true
 i18n.LangEN.String()                           // "en"
+
+i18n.SupportedLanguages                        // []Language of the built-ins above
 ```
+
+`SupportedLanguages` is the slice `IsValid` checks against, and `RegisterLanguage`
+appends to it — range over it to build a language switcher rather than hardcoding
+the table above.
 
 ### Adding Custom Languages
 
@@ -782,14 +908,44 @@ All components are thread-safe:
    without this package importing a YAML library. TOML or `.properties` is
    twenty lines and needs no change here.
 
-5. **If you use neither net/http nor YAML, steps 2 to 4 do not apply.** Bundles,
+5. **`Formatter.FormatWithContext` now takes a `context.Context`.** This one is
+   a fix, and it applies whether or not you use net/http or YAML:
+
+   ```diff
+   -func (f *Formatter) FormatWithContext(ctx interface{}, key string, params map[string]interface{}) string
+   +func (f *Formatter) FormatWithContext(ctx context.Context, key string, params map[string]interface{}) string
+   ```
+
+   It used to take an `interface{}` and type-switch on
+   `interface{ Context() interface{} }` to recognise a Fiber context. **No type
+   has ever satisfied that switch** — `fiber.Ctx` declares
+   `Context() context.Context`, not `Context() interface{}` — so every call fell
+   through to `DefaultLanguage`, including one handed a `context.Context` built
+   by `ContextWithLanguage`. The method had no test of its own, which is how it
+   stayed that way. It now resolves the language through `LanguageFromContext`:
+
+   ```go
+   // net/http — the middleware stores the language in the request context
+   formatter.FormatWithContext(r.Context(), "welcome", params)
+
+   // Fiber — the language lives in Locals, not in a context
+   formatter.Format(fiberadapter.Language(c), "welcome", params)
+   ```
+
+   Code already passing a `context.Context` keeps compiling and starts getting
+   the context's language instead of always the default. Passing anything else
+   becomes a compile error — which is the point, since it silently returned the
+   wrong answer before.
+
+6. **If you use neither net/http nor YAML, steps 2 to 4 do not apply.** Bundles,
    `Translator`, `Detector`, `RequestSource`, the context helpers,
    `MiddlewareConfig`, `ResolveMiddlewareConfig`, `ResolveCookieSameSite`, and
-   every formatting and pluralization function kept their v3 signatures in the
-   root package. `fiberadapter` users change only the import path.
+   every formatting and pluralization function other than `FormatWithContext`
+   kept their v3 signatures in the root package. `fiberadapter` users change
+   only the import path.
 
-Nothing else changed: no detection rule, no cookie attribute, no formatting
-behaviour, no translation output.
+Nothing else changed: no detection rule, no cookie attribute, no translation
+output, and no formatting behaviour beyond the `FormatWithContext` fix above.
 
 ## Upgrade Notes (v3.0.0)
 
