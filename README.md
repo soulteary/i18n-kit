@@ -1,6 +1,6 @@
 # i18n-kit
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit/v2.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit/v2)
+[![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit/v3.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit/v3)
 [![Go Report Card](.github/goreportcard.svg)](.github/goreportcard-report.md)
 [![CI](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/soulteary/i18n-kit/branch/main/graph/badge.svg)](https://codecov.io/gh/soulteary/i18n-kit)
@@ -11,6 +11,59 @@
 A lightweight, flexible internationalization (i18n) library for Go applications. Supports language detection from HTTP requests, translation bundles, and middleware for both Fiber and net/http.
 
 [中文文档](README_CN.md)
+
+
+> **v3.0.0 — Fiber support moved to a subpackage, and the module is now `/v3`.**
+> The Fiber entry points are now `github.com/soulteary/i18n-kit/v3/fiberadapter`,
+> so importing the root package no longer links Fiber (and fasthttp) into
+> binaries that never use it. In a net/http service that means **25 fewer
+> linked packages, a go.sum shrinking from 48 lines to 8, and a 25% smaller
+> binary** (8080 KB → 6100 KB, measured on a program that only calls
+> `StdMiddleware` and `T()`).
+>
+> This removes exported API from the root package, so it goes out as a new
+> major version rather than a v2 minor: **v2.2.0 keeps working untouched**, and
+> upgrading is a deliberate edit of your import path, never something
+> `go get -u` does to you.
+>
+> | Before | After |
+> |---|---|
+> | `i18n.FiberMiddleware(...)` | `fiberadapter.Middleware(...)` |
+> | `i18n.SimpleFiberMiddleware()` | `fiberadapter.SimpleMiddleware()` |
+> | `i18n.DetectFromFiber(c)` | `fiberadapter.Detect(c)` |
+> | `detector.DetectFromFiber(c)` | `fiberadapter.DetectWith(detector, c)` |
+> | `i18n.LanguageFromFiberLocals(c)` | `fiberadapter.Language(c)` |
+> | `i18n.BundleFromFiberLocals(c)` | `fiberadapter.Bundle(c)` |
+> | `i18n.TFromFiber(c, key)` | `fiberadapter.T(c, key)` |
+> | `i18n.TfFromFiber(c, key, args...)` | `fiberadapter.Tf(c, key, args...)` |
+>
+> `MiddlewareConfig.Next` moved too: a `func(fiber.Ctx) bool` field is exactly
+> what pulled Fiber into the root package, so it now lives on
+> `fiberadapter.Config`, which embeds `i18n.MiddlewareConfig`. `NextStd` and
+> everything on the net/http side are unchanged.
+>
+> One behaviour fix rides along: `TfFromFiber` discarded its arguments
+> entirely, so `"%s"` came out literal on Fiber while `TfFromContext`
+> formatted it correctly. `fiberadapter.Tf` formats.
+>
+> **Two config booleans were renamed so their zero value is the documented
+> default.** Both were plain positive bools that could not be told apart from
+> "not set", and both had a workaround that misfired:
+>
+> | Before | After | Why |
+> |---|---|---|
+> | `DetectorConfig.AcceptLanguage bool` (default `true`) | `DisableAcceptLanguage bool` | `NewDetector(DetectorConfig{})` kept `"accept"` in the default `Priority` while leaving the step off, so Accept-Language was silently ignored |
+> | `MiddlewareConfig.CookieHTTPOnly bool` (default `true`) | `DisableCookieHTTPOnly bool` | the merge took your value only once `CookieName` or `CookieSameSite` was set, so naming the cookie and nothing else silently cleared `HttpOnly` |
+>
+> Both renames are compile errors rather than silent behaviour changes, whichever
+> value you were setting.
+>
+> **`CookieSameSite` is now interpreted in one place** — `ResolveCookieSameSite`
+> — instead of once per framework. Matching is case-insensitive, `"disabled"`
+> omits the attribute, anything unrecognised means `"Lax"`, and `"None"` forces
+> `Secure` on. Previously `"strict"` meant `Strict` on Fiber and `Lax` on
+> net/http, and net/http emitted `SameSite=None` *without* `Secure`, which
+> browsers reject — so that cookie was never stored.
 
 ## Features
 
@@ -29,13 +82,14 @@ A lightweight, flexible internationalization (i18n) library for Go applications.
 - **Go 1.27+** (`go.mod` declares `go 1.27.0`)
 - `github.com/gofiber/fiber/v3` v3.4.0+ for the Fiber middleware
 
-This v2 module line targets Fiber v3. Applications still on Fiber v2 should
-remain on `github.com/soulteary/i18n-kit` v1.
+This v3 module line targets Fiber v3, and only the `fiberadapter` subpackage
+links it. Applications still on Fiber v2 should remain on
+`github.com/soulteary/i18n-kit` v1.
 
 ## Installation
 
 ```bash
-go get github.com/soulteary/i18n-kit/v2
+go get github.com/soulteary/i18n-kit/v3
 ```
 
 Fiber integrations require Fiber v3.4.0 or later. Applications that still use Fiber v2 should remain on `github.com/soulteary/i18n-kit` v1.
@@ -49,7 +103,7 @@ package main
 
 import (
     "fmt"
-    i18n "github.com/soulteary/i18n-kit/v2"
+    i18n "github.com/soulteary/i18n-kit/v3"
 )
 
 func main() {
@@ -79,7 +133,7 @@ package main
 
 import (
     "net/http"
-    i18n "github.com/soulteary/i18n-kit/v2"
+    i18n "github.com/soulteary/i18n-kit/v3"
 )
 
 func main() {
@@ -117,7 +171,8 @@ package main
 
 import (
     "github.com/gofiber/fiber/v3"
-    i18n "github.com/soulteary/i18n-kit/v2"
+    i18n "github.com/soulteary/i18n-kit/v3"
+    "github.com/soulteary/i18n-kit/v3/fiberadapter"
 )
 
 func main() {
@@ -132,10 +187,10 @@ func main() {
     app := fiber.New()
 
     // Apply middleware
-    app.Use(i18n.FiberMiddleware())
+    app.Use(fiberadapter.Middleware())
 
     app.Get("/", func(c fiber.Ctx) error {
-        greeting := i18n.TFromFiber(c, "greeting")
+        greeting := fiberadapter.T(c, "greeting")
         return c.SendString(greeting)
     })
 
@@ -307,7 +362,7 @@ i18n.TfWithLang(i18n.LangZH, "greeting", "Alice", 30)
 i18n.TfFromRequest(r, "greeting", "Alice", 30)
 i18n.TfFromContext(ctx, "greeting", "Alice", 30)
 i18n.TfFromContextWithBundle(ctx, "greeting", "Alice", 30)
-i18n.TfFromFiber(c, "greeting", "Alice", 30)
+fiberadapter.Tf(c, "greeting", "Alice", 30)
 ```
 
 **When the translation is missing, the key is returned unformatted and the
@@ -392,29 +447,30 @@ func handler(w http.ResponseWriter, r *http.Request) {
 ### Full Configuration
 
 ```go
-config := i18n.MiddlewareConfig{
-    Detector:       i18n.DefaultDetector,  // Language detector
-    Bundle:         myBundle,              // Custom bundle (optional)
-    SetCookie:      true,                  // Set language cookie
-    CookieName:     "lang",
-    CookieMaxAge:   86400 * 365,           // 1 year
-    CookiePath:     "/",
-    CookieSecure:   true,
-    CookieHTTPOnly: true,
-    CookieSameSite: "Lax",
-    Next: func(c fiber.Ctx) bool {        // Skip middleware
+config := fiberadapter.Config{
+    MiddlewareConfig: i18n.MiddlewareConfig{
+        Detector:       i18n.DefaultDetector,  // Language detector
+        Bundle:         myBundle,              // Custom bundle (optional)
+        SetCookie:      true,                  // Set language cookie
+        CookieName:     "lang",
+        CookieMaxAge:   86400 * 365,           // 1 year
+        CookiePath:     "/",
+        CookieSecure:   true,
+        CookieSameSite: "Lax",           // Lax | Strict | None | disabled
+    },
+    Next: func(c fiber.Ctx) bool {             // Skip middleware
         return c.Path() == "/health"
     },
 }
 
-app.Use(i18n.FiberMiddleware(config))
+app.Use(fiberadapter.Middleware(config))
 ```
 
 ### Skip Middleware for Specific Paths
 
 ```go
 // For Fiber
-config := i18n.MiddlewareConfig{
+config := fiberadapter.Config{
     Next: func(c fiber.Ctx) bool {
         return c.Path() == "/api/internal"
     },

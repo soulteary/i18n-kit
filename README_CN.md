@@ -1,6 +1,6 @@
 # i18n-kit
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit/v2.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit/v2)
+[![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit/v3.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit/v3)
 [![Go Report Card](.github/goreportcard.svg)](.github/goreportcard-report.md)
 [![CI](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/soulteary/i18n-kit/branch/main/graph/badge.svg)](https://codecov.io/gh/soulteary/i18n-kit)
@@ -9,6 +9,50 @@
 一个轻量级、灵活的 Go 国际化 (i18n) 库。支持从 HTTP 请求自动检测语言、翻译包管理，以及 Fiber 和 net/http 双框架中间件。
 
 [English Documentation](README.md)
+
+
+> **v3.0.0 —— Fiber 支持移入子包，模块路径升为 `/v3`。**
+> Fiber 入口现位于 `github.com/soulteary/i18n-kit/v3/fiberadapter`，
+> 于是导入根包不再把 Fiber（以及 fasthttp）链接进用不到它的二进制。
+> 对一个 net/http 服务来说，这意味着**少链接 25 个包、go.sum 从 48 行降到 8 行、
+> 二进制小 25%**（8080 KB → 6100 KB，实测程序只调用 `StdMiddleware` 和 `T()`）。
+>
+> 本次从根包删除了导出 API，因此作为新主版本发布，而不是 v2 的 minor：
+> **v2.2.0 原样继续可用**，升级是你主动改 import path 的行为，
+> 绝不会被 `go get -u` 悄悄换掉。
+>
+> | 原来 | 现在 |
+> |---|---|
+> | `i18n.FiberMiddleware(...)` | `fiberadapter.Middleware(...)` |
+> | `i18n.SimpleFiberMiddleware()` | `fiberadapter.SimpleMiddleware()` |
+> | `i18n.DetectFromFiber(c)` | `fiberadapter.Detect(c)` |
+> | `detector.DetectFromFiber(c)` | `fiberadapter.DetectWith(detector, c)` |
+> | `i18n.LanguageFromFiberLocals(c)` | `fiberadapter.Language(c)` |
+> | `i18n.BundleFromFiberLocals(c)` | `fiberadapter.Bundle(c)` |
+> | `i18n.TFromFiber(c, key)` | `fiberadapter.T(c, key)` |
+> | `i18n.TfFromFiber(c, key, args...)` | `fiberadapter.Tf(c, key, args...)` |
+>
+> `MiddlewareConfig.Next` 也跟着搬了：一个 `func(fiber.Ctx) bool` 字段正是把
+> Fiber 拖进根包的原因，现在它在 `fiberadapter.Config` 上，该结构体内嵌
+> `i18n.MiddlewareConfig`。`NextStd` 与 net/http 一侧没有任何变化。
+>
+> 顺带修掉一个行为缺陷：`TfFromFiber` 把参数整个丢掉，于是 `"%s"` 在 Fiber 侧
+> 原样输出，而 `TfFromContext` 是正常格式化的。`fiberadapter.Tf` 会格式化。
+>
+> **两个配置布尔字段被改名，使其零值就是文档中写的默认值。**
+> 它们原本都是正向 bool，无法与「没设置」区分，于是各自打了个会误伤的补丁：
+>
+> | 原来 | 现在 | 原因 |
+> |---|---|---|
+> | `DetectorConfig.AcceptLanguage bool`（默认 `true`） | `DisableAcceptLanguage bool` | `NewDetector(DetectorConfig{})` 会保留默认 `Priority` 里的 `"accept"`，却把这一步关着，于是 Accept-Language 被静默忽略 |
+> | `MiddlewareConfig.CookieHTTPOnly bool`（默认 `true`） | `DisableCookieHTTPOnly bool` | 只有在同时设了 `CookieName` 或 `CookieSameSite` 时才会采用你的值，于是「只改个 cookie 名字」会静默清掉 `HttpOnly` |
+>
+> 无论你原先设的是 `true` 还是 `false`，改名都会产生编译错误，而不是静默改变行为。
+>
+> **`CookieSameSite` 现在只在一处解析** —— `ResolveCookieSameSite` —— 不再每个框架各解析一遍。
+> 大小写不敏感，`"disabled"` 表示不输出该属性，无法识别的值一律按 `"Lax"` 处理，
+> `"None"` 会强制打开 `Secure`。此前 `"strict"` 在 Fiber 侧是 `Strict`、在 net/http 侧却是 `Lax`；
+> 且 net/http 侧的 `SameSite=None` **不带 `Secure`**，会被浏览器直接丢弃 —— 那个 cookie 从未被存下来过。
 
 ## 特性
 
@@ -27,13 +71,13 @@
 - **Go 1.27+**（`go.mod` 声明 `go 1.27.0`）
 - Fiber 中间件需要 `github.com/gofiber/fiber/v3` v3.4.0+
 
-v2 模块线面向 Fiber v3。仍在 Fiber v2 上的应用请继续使用
-`github.com/soulteary/i18n-kit` v1。
+v3 模块线面向 Fiber v3，且只有 `fiberadapter` 子包会链接它。
+仍在 Fiber v2 上的应用请继续使用 `github.com/soulteary/i18n-kit` v1。
 
 ## 安装
 
 ```bash
-go get github.com/soulteary/i18n-kit/v2
+go get github.com/soulteary/i18n-kit/v3
 ```
 
 Fiber 集成要求 Fiber v3.4.0 或更高版本。仍使用 Fiber v2 的应用应继续使用 `github.com/soulteary/i18n-kit` v1。
@@ -47,7 +91,7 @@ package main
 
 import (
     "fmt"
-    i18n "github.com/soulteary/i18n-kit/v2"
+    i18n "github.com/soulteary/i18n-kit/v3"
 )
 
 func main() {
@@ -77,7 +121,7 @@ package main
 
 import (
     "net/http"
-    i18n "github.com/soulteary/i18n-kit/v2"
+    i18n "github.com/soulteary/i18n-kit/v3"
 )
 
 func main() {
@@ -115,7 +159,8 @@ package main
 
 import (
     "github.com/gofiber/fiber/v3"
-    i18n "github.com/soulteary/i18n-kit/v2"
+    i18n "github.com/soulteary/i18n-kit/v3"
+    "github.com/soulteary/i18n-kit/v3/fiberadapter"
 )
 
 func main() {
@@ -130,10 +175,10 @@ func main() {
     app := fiber.New()
 
     // 应用中间件
-    app.Use(i18n.FiberMiddleware())
+    app.Use(fiberadapter.Middleware())
 
     app.Get("/", func(c fiber.Ctx) error {
-        greeting := i18n.TFromFiber(c, "greeting")
+        greeting := fiberadapter.T(c, "greeting")
         return c.SendString(greeting)
     })
 
@@ -299,7 +344,7 @@ i18n.TfWithLang(i18n.LangZH, "greeting", "Alice", 30)
 i18n.TfFromRequest(r, "greeting", "Alice", 30)
 i18n.TfFromContext(ctx, "greeting", "Alice", 30)
 i18n.TfFromContextWithBundle(ctx, "greeting", "Alice", 30)
-i18n.TfFromFiber(c, "greeting", "Alice", 30)
+fiberadapter.Tf(c, "greeting", "Alice", 30)
 ```
 
 **译文缺失时返回未格式化的 key，并丢弃参数。** 这一点很重要，否则缺失的 key 会被当作
@@ -380,29 +425,30 @@ func handler(w http.ResponseWriter, r *http.Request) {
 ### 完整配置
 
 ```go
-config := i18n.MiddlewareConfig{
-    Detector:       i18n.DefaultDetector,  // 语言检测器
-    Bundle:         myBundle,              // 自定义翻译包（可选）
-    SetCookie:      true,                  // 设置语言 Cookie
-    CookieName:     "lang",
-    CookieMaxAge:   86400 * 365,           // 1 年
-    CookiePath:     "/",
-    CookieSecure:   true,
-    CookieHTTPOnly: true,
-    CookieSameSite: "Lax",
-    Next: func(c fiber.Ctx) bool {        // 跳过中间件
+config := fiberadapter.Config{
+    MiddlewareConfig: i18n.MiddlewareConfig{
+        Detector:       i18n.DefaultDetector,  // 语言检测器
+        Bundle:         myBundle,              // 自定义翻译包（可选）
+        SetCookie:      true,                  // 设置语言 Cookie
+        CookieName:     "lang",
+        CookieMaxAge:   86400 * 365,           // 1 年
+        CookiePath:     "/",
+        CookieSecure:   true,
+        CookieSameSite: "Lax",           // Lax | Strict | None | disabled
+    },
+    Next: func(c fiber.Ctx) bool {             // 跳过中间件
         return c.Path() == "/health"
     },
 }
 
-app.Use(i18n.FiberMiddleware(config))
+app.Use(fiberadapter.Middleware(config))
 ```
 
 ### 跳过特定路径
 
 ```go
 // Fiber
-config := i18n.MiddlewareConfig{
+config := fiberadapter.Config{
     Next: func(c fiber.Ctx) bool {
         return c.Path() == "/api/internal"
     },

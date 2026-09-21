@@ -2,8 +2,6 @@ package i18n
 
 import (
 	"net/http"
-
-	"github.com/gofiber/fiber/v3"
 )
 
 // MiddlewareConfig configures the i18n middleware.
@@ -36,17 +34,27 @@ type MiddlewareConfig struct {
 	// Default: false
 	CookieSecure bool
 
-	// CookieHTTPOnly sets the HttpOnly flag on the cookie.
-	// Default: true
-	CookieHTTPOnly bool
+	// DisableCookieHTTPOnly clears the HttpOnly flag on the cookie.
+	//
+	// Negative so that the zero value is the documented default. As a plain
+	// CookieHTTPOnly bool it could not be told apart from "not set", and the
+	// merge worked around that by guessing: it took the caller's value only
+	// once CookieName or CookieSameSite was also set, so naming the cookie and
+	// nothing else silently cleared HttpOnly. There is nothing to guess now.
+	//
+	// Default: false, i.e. the cookie is HttpOnly.
+	DisableCookieHTTPOnly bool
 
-	// CookieSameSite sets the SameSite attribute.
+	// CookieSameSite sets the SameSite attribute: "Lax", "Strict", "None" or
+	// "disabled" to omit the attribute. Matching is case-insensitive and an
+	// unrecognised value means "Lax"; see ResolveCookieSameSite, which every
+	// middleware uses so the frameworks cannot read it differently.
+	//
+	// "None" forces Secure on, because browsers reject the combination
+	// otherwise and the cookie is never stored.
+	//
 	// Default: "Lax"
 	CookieSameSite string
-
-	// Next defines a function to skip this middleware when true.
-	// Default: nil
-	Next func(c fiber.Ctx) bool
 
 	// NextStd defines a function to skip middleware for net/http when true.
 	// Default: nil
@@ -63,17 +71,44 @@ func DefaultMiddlewareConfig() MiddlewareConfig {
 		CookieMaxAge:   86400 * 365,
 		CookiePath:     "/",
 		CookieSecure:   false,
-		CookieHTTPOnly: true,
 		CookieSameSite: "Lax",
-		Next:           nil,
 		NextStd:        nil,
 	}
 }
 
+// ResolveMiddlewareConfig turns a middleware's variadic config argument into
+// the effective configuration, applying the same defaults and the same merge
+// rules every middleware uses. Framework adapters call this instead of
+// restating the rules -- see the fiberadapter subpackage.
+func ResolveMiddlewareConfig(config ...MiddlewareConfig) MiddlewareConfig {
+	cfg := DefaultMiddlewareConfig()
+	if len(config) > 0 {
+		cfg = mergeConfig(cfg, config[0])
+	}
+	return cfg
+}
+
+// LocalsLanguageKey and LocalsBundleKey are the keys under which a framework
+// adapter stores the detected language and the bundle on its per-request
+// storage, so that every adapter and every reader of one agrees on where to
+// look.
+//
+// They are NOT interchangeable with this package's net/http context keys. Those
+// spell the same two strings but have an unexported type, so a value stored
+// under LocalsLanguageKey does not read back through LanguageFromContext, and
+// TFromContext on such a framework answers in the default language without
+// reporting anything. Read the language through the adapter's own accessor --
+// fiberadapter.Language, say -- or call ContextWithLanguage yourself first if
+// you want the context helpers to see it.
+const (
+	LocalsLanguageKey = "i18n-language"
+	LocalsBundleKey   = "i18n-bundle"
+)
+
 // mergeConfig merges user config with defaults.
-// User-provided non-zero values override defaults.
-// For boolean fields like SetCookie and CookieSecure, we always take the user's value.
-// For CookieHTTPOnly, we keep the default (true) unless user explicitly provides cookie config.
+// User-provided non-zero values override defaults. Every bool is taken from the
+// caller as-is: each one is named so that its zero value is the default, which
+// is what lets the merge be this plain.
 func mergeConfig(defaults, user MiddlewareConfig) MiddlewareConfig {
 	result := defaults
 
@@ -96,17 +131,10 @@ func mergeConfig(defaults, user MiddlewareConfig) MiddlewareConfig {
 	}
 	// CookieSecure is a bool - take from user
 	result.CookieSecure = user.CookieSecure
-	// CookieHTTPOnly: We keep the default (true) unless user explicitly provides other cookie settings
-	// This is a pragmatic choice since HttpOnly=true is almost always what you want for security
-	// If user provides CookieName or CookieSameSite, we assume they want full control
-	if user.CookieName != "" || user.CookieSameSite != "" {
-		result.CookieHTTPOnly = user.CookieHTTPOnly
-	}
+	// DisableCookieHTTPOnly is a bool - take from user
+	result.DisableCookieHTTPOnly = user.DisableCookieHTTPOnly
 	if user.CookieSameSite != "" {
 		result.CookieSameSite = user.CookieSameSite
-	}
-	if user.Next != nil {
-		result.Next = user.Next
 	}
 	if user.NextStd != nil {
 		result.NextStd = user.NextStd
@@ -115,81 +143,9 @@ func mergeConfig(defaults, user MiddlewareConfig) MiddlewareConfig {
 	return result
 }
 
-// FiberMiddleware creates a Fiber middleware for language detection.
-func FiberMiddleware(config ...MiddlewareConfig) fiber.Handler {
-	cfg := DefaultMiddlewareConfig()
-	if len(config) > 0 {
-		cfg = mergeConfig(cfg, config[0])
-	}
-
-	return func(c fiber.Ctx) error {
-		// Skip middleware if Next returns true
-		if cfg.Next != nil && cfg.Next(c) {
-			return c.Next()
-		}
-
-		// Detect language
-		lang := cfg.Detector.DetectFromFiber(c)
-
-		// Store in Fiber locals
-		c.Locals("i18n-language", lang)
-
-		// Store bundle if provided
-		if cfg.Bundle != nil {
-			c.Locals("i18n-bundle", cfg.Bundle)
-		}
-
-		// Set cookie if configured
-		if cfg.SetCookie {
-			c.Cookie(&fiber.Cookie{
-				Name:     cfg.CookieName,
-				Value:    string(lang),
-				MaxAge:   cfg.CookieMaxAge,
-				Path:     cfg.CookiePath,
-				Secure:   cfg.CookieSecure,
-				HTTPOnly: cfg.CookieHTTPOnly,
-				SameSite: cfg.CookieSameSite,
-			})
-		}
-
-		return c.Next()
-	}
-}
-
-// LanguageFromFiberLocals extracts the language from Fiber locals.
-func LanguageFromFiberLocals(c fiber.Ctx) Language {
-	if lang, ok := c.Locals("i18n-language").(Language); ok {
-		return lang
-	}
-	return DefaultLanguage
-}
-
-// BundleFromFiberLocals extracts the bundle from Fiber locals.
-func BundleFromFiberLocals(c fiber.Ctx) *Bundle {
-	if bundle, ok := c.Locals("i18n-bundle").(*Bundle); ok {
-		return bundle
-	}
-	return DefaultBundle
-}
-
-// TFromFiber returns the translated string using the language from Fiber context.
-func TFromFiber(c fiber.Ctx, key string) string {
-	bundle := BundleFromFiberLocals(c)
-	lang := LanguageFromFiberLocals(c)
-	return bundle.GetTranslation(lang, key)
-}
-
-// TfFromFiber returns a formatted translated string using the language from Fiber context.
-func TfFromFiber(c fiber.Ctx, key string, args ...interface{}) string {
-	return TFromFiber(c, key)
-}
-
 // StdMiddleware creates a net/http middleware for language detection.
 func StdMiddleware(config ...MiddlewareConfig) func(http.Handler) http.Handler {
-	cfg := DefaultMiddlewareConfig()
-	if len(config) > 0 {
-		cfg = mergeConfig(cfg, config[0])
-	}
+	cfg := ResolveMiddlewareConfig(config...)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -215,23 +171,23 @@ func StdMiddleware(config ...MiddlewareConfig) func(http.Handler) http.Handler {
 
 			// Set cookie if configured
 			if cfg.SetCookie {
-				sameSite := http.SameSiteLaxMode
-				switch cfg.CookieSameSite {
-				case "Strict":
-					sameSite = http.SameSiteStrictMode
-				case "None":
-					sameSite = http.SameSiteNoneMode
-				}
+				mode := ResolveCookieSameSite(cfg.CookieSameSite)
 
-				http.SetCookie(w, &http.Cookie{
+				cookie := &http.Cookie{
 					Name:     cfg.CookieName,
 					Value:    string(lang),
 					MaxAge:   cfg.CookieMaxAge,
 					Path:     cfg.CookiePath,
-					Secure:   cfg.CookieSecure,
-					HttpOnly: cfg.CookieHTTPOnly,
-					SameSite: sameSite,
-				})
+					Secure:   cfg.CookieSecure || mode.RequiresSecure(),
+					HttpOnly: !cfg.DisableCookieHTTPOnly,
+				}
+				// A zero SameSite writes no attribute, which is what
+				// SameSiteDisabled asks for.
+				if sameSite, ok := mode.HTTPSameSite(); ok {
+					cookie.SameSite = sameSite
+				}
+
+				http.SetCookie(w, cookie)
 			}
 
 			next.ServeHTTP(w, r)
@@ -252,10 +208,4 @@ func StdMiddlewareFunc(config ...MiddlewareConfig) func(http.HandlerFunc) http.H
 // This is a convenience function for the common use case.
 func SimpleMiddleware() func(http.Handler) http.Handler {
 	return StdMiddleware(DefaultMiddlewareConfig())
-}
-
-// SimpleFiberMiddleware creates a simple Fiber middleware that only detects language.
-// This is a convenience function for the common use case.
-func SimpleFiberMiddleware() fiber.Handler {
-	return FiberMiddleware(DefaultMiddlewareConfig())
 }

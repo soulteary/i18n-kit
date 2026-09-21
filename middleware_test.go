@@ -1,12 +1,10 @@
 package i18n
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gofiber/fiber/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,7 +19,7 @@ func TestDefaultMiddlewareConfig(t *testing.T) {
 	assert.Equal(t, 86400*365, config.CookieMaxAge)
 	assert.Equal(t, "/", config.CookiePath)
 	assert.False(t, config.CookieSecure)
-	assert.True(t, config.CookieHTTPOnly)
+	assert.False(t, config.DisableCookieHTTPOnly)
 	assert.Equal(t, "Lax", config.CookieSameSite)
 }
 
@@ -191,172 +189,112 @@ func TestSimpleMiddleware(t *testing.T) {
 	assert.Equal(t, "de", rec.Body.String())
 }
 
-func TestFiberMiddleware_Basic(t *testing.T) {
-	app := fiber.New()
+// ResolveMiddlewareConfig is what a framework adapter calls instead of
+// restating the merge rules, so the rules need testing directly rather than
+// only through whichever middleware happens to exercise them.
 
-	app.Use(FiberMiddleware())
-
-	app.Get("/", func(c fiber.Ctx) error {
-		lang := LanguageFromFiberLocals(c)
-		return c.SendString(string(lang))
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/?lang=zh", nil)
-	resp, err := app.Test(req)
-	require.NoError(t, err)
-
-	body, _ := io.ReadAll(resp.Body)
-	assert.Equal(t, "zh", string(body))
+func TestResolveMiddlewareConfig_NoArgsGivesDefaults(t *testing.T) {
+	assert.Equal(t, DefaultMiddlewareConfig(), ResolveMiddlewareConfig())
 }
 
-func TestFiberMiddleware_WithBundle(t *testing.T) {
+func TestResolveMiddlewareConfig_ZeroConfigKeepsDefaults(t *testing.T) {
+	cfg := ResolveMiddlewareConfig(MiddlewareConfig{})
+
+	assert.Equal(t, DefaultDetector, cfg.Detector)
+	assert.Nil(t, cfg.Bundle)
+	assert.Equal(t, "lang", cfg.CookieName)
+	assert.Equal(t, 86400*365, cfg.CookieMaxAge)
+	assert.Equal(t, "/", cfg.CookiePath)
+	assert.Equal(t, "Lax", cfg.CookieSameSite)
+	assert.False(t, cfg.DisableCookieHTTPOnly)
+	assert.False(t, cfg.SetCookie)
+	assert.False(t, cfg.CookieSecure)
+}
+
+func TestResolveMiddlewareConfig_UserValuesOverrideDefaults(t *testing.T) {
+	detector := NewDetector(DetectorConfig{Priority: []string{"header"}})
 	bundle := NewBundle(LangEN)
-	bundle.AddTranslation(LangEN, "greeting", "Fiber Hello")
+	nextStd := func(*http.Request) bool { return true }
 
-	app := fiber.New()
-
-	app.Use(FiberMiddleware(MiddlewareConfig{
-		Bundle: bundle,
-	}))
-
-	app.Get("/", func(c fiber.Ctx) error {
-		b := BundleFromFiberLocals(c)
-		return c.SendString(b.GetTranslation(LangEN, "greeting"))
+	cfg := ResolveMiddlewareConfig(MiddlewareConfig{
+		Detector:       detector,
+		Bundle:         bundle,
+		SetCookie:      true,
+		CookieName:     "site_lang",
+		CookieMaxAge:   60,
+		CookiePath:     "/app",
+		CookieSecure:   true,
+		CookieSameSite: "Strict",
+		NextStd:        nextStd,
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	resp, err := app.Test(req)
-	require.NoError(t, err)
-
-	body, _ := io.ReadAll(resp.Body)
-	assert.Equal(t, "Fiber Hello", string(body))
+	assert.Same(t, detector, cfg.Detector)
+	assert.Same(t, bundle, cfg.Bundle)
+	assert.True(t, cfg.SetCookie)
+	assert.Equal(t, "site_lang", cfg.CookieName)
+	assert.Equal(t, 60, cfg.CookieMaxAge)
+	assert.Equal(t, "/app", cfg.CookiePath)
+	assert.True(t, cfg.CookieSecure)
+	assert.False(t, cfg.DisableCookieHTTPOnly)
+	assert.Equal(t, "Strict", cfg.CookieSameSite)
+	require.NotNil(t, cfg.NextStd)
+	assert.True(t, cfg.NextStd(nil))
 }
 
-func TestFiberMiddleware_SetCookie(t *testing.T) {
-	app := fiber.New()
+// Only the second argument onwards is ignored -- the variadic is "zero or one
+// config" in practice, and an adapter passing a slice must not get a silent
+// merge of both.
+func TestResolveMiddlewareConfig_IgnoresExtraConfigs(t *testing.T) {
+	cfg := ResolveMiddlewareConfig(
+		MiddlewareConfig{CookieName: "first"},
+		MiddlewareConfig{CookieName: "second", CookiePath: "/ignored"},
+	)
 
-	app.Use(FiberMiddleware(MiddlewareConfig{
-		SetCookie: true,
-	}))
+	assert.Equal(t, "first", cfg.CookieName)
+	assert.Equal(t, "/", cfg.CookiePath)
+}
 
-	app.Get("/", func(c fiber.Ctx) error {
-		return c.SendString("ok")
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/?lang=zh", nil)
-	resp, err := app.Test(req)
-	require.NoError(t, err)
-
-	// Check cookie was set
-	cookies := resp.Cookies()
-	var langCookie *http.Cookie
-	for _, c := range cookies {
-		if c.Name == "lang" {
-			langCookie = c
-			break
-		}
+// HttpOnly is on unless it is switched off, and nothing else a caller sets can
+// switch it off. It used to be inferred: mergeConfig took the caller's
+// CookieHTTPOnly only once CookieName or CookieSameSite was also set, so naming
+// the cookie and nothing else silently cleared the flag. That guess is gone
+// along with the field it worked around.
+func TestResolveMiddlewareConfig_HTTPOnlyRule(t *testing.T) {
+	tests := []struct {
+		name string
+		user MiddlewareConfig
+		want bool
+	}{
+		{"untouched is HttpOnly", MiddlewareConfig{}, true},
+		{"an unrelated field does not clear it", MiddlewareConfig{CookieMaxAge: 60}, true},
+		{"naming the cookie does not clear it", MiddlewareConfig{CookieName: "site_lang"}, true},
+		{"setting SameSite does not clear it", MiddlewareConfig{CookieSameSite: "Strict"}, true},
+		{"setting several cookie fields does not clear it", MiddlewareConfig{CookieName: "site_lang", CookieSameSite: "Strict", CookiePath: "/app"}, true},
+		{"only asking clears it", MiddlewareConfig{DisableCookieHTTPOnly: true}, false},
 	}
 
-	require.NotNil(t, langCookie)
-	assert.Equal(t, "zh", langCookie.Value)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, !ResolveMiddlewareConfig(tt.user).DisableCookieHTTPOnly)
+		})
+	}
 }
 
-func TestFiberMiddleware_Next(t *testing.T) {
-	app := fiber.New()
+// StdMiddleware must go through ResolveMiddlewareConfig rather than keeping its
+// own copy of the defaults: that equivalence is the whole point of exporting it.
+func TestStdMiddleware_UsesResolvedConfig(t *testing.T) {
+	cfg := ResolveMiddlewareConfig(MiddlewareConfig{SetCookie: true, CookieName: "site_lang"})
 
-	app.Use(FiberMiddleware(MiddlewareConfig{
-		Next: func(c fiber.Ctx) bool {
-			return c.Path() == "/skip"
-		},
-	}))
+	handler := StdMiddleware(MiddlewareConfig{SetCookie: true, CookieName: "site_lang"})(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 
-	app.Get("/skip", func(c fiber.Ctx) error {
-		lang := LanguageFromFiberLocals(c)
-		return c.SendString(string(lang))
-	})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?lang=zh", nil))
 
-	app.Get("/normal", func(c fiber.Ctx) error {
-		lang := LanguageFromFiberLocals(c)
-		return c.SendString(string(lang))
-	})
-
-	// Should skip middleware
-	req := httptest.NewRequest(http.MethodGet, "/skip?lang=zh", nil)
-	resp, _ := app.Test(req)
-	body, _ := io.ReadAll(resp.Body)
-	assert.Equal(t, string(DefaultLanguage), string(body))
-
-	// Should not skip
-	req = httptest.NewRequest(http.MethodGet, "/normal?lang=zh", nil)
-	resp, _ = app.Test(req)
-	body, _ = io.ReadAll(resp.Body)
-	assert.Equal(t, "zh", string(body))
-}
-
-func TestTFromFiber(t *testing.T) {
-	bundle := NewBundle(LangEN)
-	bundle.AddTranslation(LangEN, "greeting", "Hello")
-	bundle.AddTranslation(LangZH, "greeting", "你好")
-
-	app := fiber.New()
-
-	app.Use(FiberMiddleware(MiddlewareConfig{
-		Bundle: bundle,
-	}))
-
-	app.Get("/", func(c fiber.Ctx) error {
-		return c.SendString(TFromFiber(c, "greeting"))
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/?lang=zh", nil)
-	resp, _ := app.Test(req)
-	body, _ := io.ReadAll(resp.Body)
-	assert.Equal(t, "你好", string(body))
-}
-
-func TestLanguageFromFiberLocals_NoValue(t *testing.T) {
-	app := fiber.New()
-
-	app.Get("/", func(c fiber.Ctx) error {
-		lang := LanguageFromFiberLocals(c)
-		return c.SendString(string(lang))
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	resp, _ := app.Test(req)
-	body, _ := io.ReadAll(resp.Body)
-	assert.Equal(t, string(DefaultLanguage), string(body))
-}
-
-func TestBundleFromFiberLocals_NoValue(t *testing.T) {
-	app := fiber.New()
-
-	app.Get("/", func(c fiber.Ctx) error {
-		bundle := BundleFromFiberLocals(c)
-		if bundle == DefaultBundle {
-			return c.SendString("default")
-		}
-		return c.SendString("custom")
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	resp, _ := app.Test(req)
-	body, _ := io.ReadAll(resp.Body)
-	assert.Equal(t, "default", string(body))
-}
-
-func TestSimpleFiberMiddleware(t *testing.T) {
-	app := fiber.New()
-
-	app.Use(SimpleFiberMiddleware())
-
-	app.Get("/", func(c fiber.Ctx) error {
-		lang := LanguageFromFiberLocals(c)
-		return c.SendString(string(lang))
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/?lang=ko", nil)
-	resp, _ := app.Test(req)
-	body, _ := io.ReadAll(resp.Body)
-	assert.Equal(t, "ko", string(body))
+	cookies := rec.Result().Cookies()
+	require.Len(t, cookies, 1)
+	assert.Equal(t, cfg.CookieName, cookies[0].Name)
+	assert.Equal(t, cfg.CookieMaxAge, cookies[0].MaxAge)
+	assert.Equal(t, cfg.CookiePath, cookies[0].Path)
+	assert.Equal(t, !cfg.DisableCookieHTTPOnly, cookies[0].HttpOnly)
 }
