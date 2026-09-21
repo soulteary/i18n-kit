@@ -38,6 +38,21 @@
 >
 > 顺带修掉一个行为缺陷：`TfFromFiber` 把参数整个丢掉，于是 `"%s"` 在 Fiber 侧
 > 原样输出，而 `TfFromContext` 是正常格式化的。`fiberadapter.Tf` 会格式化。
+>
+> **两个配置布尔字段被改名，使其零值就是文档中写的默认值。**
+> 它们原本都是正向 bool，无法与「没设置」区分，于是各自打了个会误伤的补丁：
+>
+> | 原来 | 现在 | 原因 |
+> |---|---|---|
+> | `DetectorConfig.AcceptLanguage bool`（默认 `true`） | `DisableAcceptLanguage bool` | `NewDetector(DetectorConfig{})` 会保留默认 `Priority` 里的 `"accept"`，却把这一步关着，于是 Accept-Language 被静默忽略 |
+> | `MiddlewareConfig.CookieHTTPOnly bool`（默认 `true`） | `DisableCookieHTTPOnly bool` | 只有在同时设了 `CookieName` 或 `CookieSameSite` 时才会采用你的值，于是「只改个 cookie 名字」会静默清掉 `HttpOnly` |
+>
+> 无论你原先设的是 `true` 还是 `false`，改名都会产生编译错误，而不是静默改变行为。
+>
+> **`CookieSameSite` 现在只在一处解析** —— `ResolveCookieSameSite` —— 不再每个框架各解析一遍。
+> 大小写不敏感，`"disabled"` 表示不输出该属性，无法识别的值一律按 `"Lax"` 处理，
+> `"None"` 会强制打开 `Secure`。此前 `"strict"` 在 Fiber 侧是 `Strict`、在 net/http 侧却是 `Lax`；
+> 且 net/http 侧的 `SameSite=None` **不带 `Secure`**，会被浏览器直接丢弃 —— 那个 cookie 从未被存下来过。
 
 ## 特性
 
@@ -419,8 +434,7 @@ config := fiberadapter.Config{
         CookieMaxAge:   86400 * 365,           // 1 年
         CookiePath:     "/",
         CookieSecure:   true,
-        CookieHTTPOnly: true,
-        CookieSameSite: "Lax",
+        CookieSameSite: "Lax",           // Lax | Strict | None | disabled
     },
     Next: func(c fiber.Ctx) bool {             // 跳过中间件
         return c.Path() == "/health"

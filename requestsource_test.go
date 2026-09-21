@@ -68,7 +68,7 @@ func TestDetect_CustomRequestSource(t *testing.T) {
 		},
 		{
 			name:   "accept-language",
-			config: DetectorConfig{AcceptLanguage: true},
+			config: DetectorConfig{},
 			src:    fakeSource{header: map[string]string{"Accept-Language": "fr-FR,fr;q=0.9"}},
 			want:   LangFR,
 		},
@@ -80,7 +80,7 @@ func TestDetect_CustomRequestSource(t *testing.T) {
 		},
 		{
 			name:   "query wins over everything behind it",
-			config: DetectorConfig{AcceptLanguage: true},
+			config: DetectorConfig{},
 			src: fakeSource{
 				query:  map[string]string{"lang": "zh"},
 				cookie: map[string]string{"lang": "ja"},
@@ -107,8 +107,8 @@ func TestDetect_CustomRequestSource(t *testing.T) {
 			want: LangJA,
 		},
 		{
-			name:   "AcceptLanguage=false skips the accept step",
-			config: DetectorConfig{AcceptLanguage: false},
+			name:   "DisableAcceptLanguage skips the accept step",
+			config: DetectorConfig{DisableAcceptLanguage: true},
 			src:    fakeSource{header: map[string]string{"Accept-Language": "fr"}},
 			want:   DefaultLanguage,
 		},
@@ -143,7 +143,7 @@ func TestDetect_CustomRequestSource(t *testing.T) {
 		},
 		{
 			name:   "Accept-Language honours q-values, not document order",
-			config: DetectorConfig{Priority: []string{"accept"}, AcceptLanguage: true},
+			config: DetectorConfig{Priority: []string{"accept"}},
 			src:    fakeSource{header: map[string]string{"Accept-Language": "en;q=0.3,ko;q=0.9"}},
 			want:   LangKO,
 		},
@@ -157,18 +157,26 @@ func TestDetect_CustomRequestSource(t *testing.T) {
 	}
 }
 
-// NewDetector fills in every zero-valued field except AcceptLanguage, which is
-// a bool it cannot tell apart from "not set". So a zero DetectorConfig keeps
-// "accept" in the default Priority while leaving the step switched off, and
-// Accept-Language is silently ignored. Pinned because it is surprising: reach
-// for DefaultDetectorConfig() (or set AcceptLanguage explicitly) when you want
-// the documented defaults.
-func TestNewDetector_ZeroConfigLeavesAcceptLanguageOff(t *testing.T) {
+// A zero DetectorConfig has to behave as DefaultDetectorConfig() documents.
+// It did not: AcceptLanguage was a bool NewDetector could not tell apart from
+// "not set", so the default Priority kept "accept" while the step stayed off
+// and Accept-Language was silently ignored. The field is now
+// DisableAcceptLanguage, whose zero value is the documented default.
+func TestNewDetector_ZeroConfigMatchesDefaults(t *testing.T) {
 	src := &fakeSource{header: map[string]string{"Accept-Language": "fr"}}
 
-	assert.Equal(t, DefaultLanguage, NewDetector(DetectorConfig{}).Detect(src))
+	assert.Equal(t, LangFR, NewDetector(DetectorConfig{}).Detect(src))
 	assert.Equal(t, LangFR, NewDetector(DefaultDetectorConfig()).Detect(src))
 	assert.Equal(t, LangFR, DefaultDetector.Detect(src))
+}
+
+// Turning the step off is still possible, and is now something you say rather
+// than something you fail to say.
+func TestNewDetector_DisableAcceptLanguage(t *testing.T) {
+	src := &fakeSource{header: map[string]string{"Accept-Language": "fr"}}
+
+	assert.Equal(t, DefaultLanguage,
+		NewDetector(DetectorConfig{DisableAcceptLanguage: true}).Detect(src))
 }
 
 // A method missing from Priority must not even be read: an adapter's lookup can
@@ -190,7 +198,7 @@ func TestDetect_ConsultsOnlyConfiguredMethods(t *testing.T) {
 func TestDetect_AcceptStepReadsAcceptLanguageHeader(t *testing.T) {
 	src := &fakeSource{}
 
-	NewDetector(DetectorConfig{Priority: []string{"header", "accept"}, AcceptLanguage: true, HeaderName: "X-Locale"}).Detect(src)
+	NewDetector(DetectorConfig{Priority: []string{"header", "accept"}, HeaderName: "X-Locale"}).Detect(src)
 
 	assert.Equal(t, []string{"X-Locale", "Accept-Language"}, src.headers)
 }

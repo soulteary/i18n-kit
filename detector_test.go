@@ -14,7 +14,7 @@ func TestDefaultDetectorConfig(t *testing.T) {
 	assert.Equal(t, "lang", config.QueryParam)
 	assert.Equal(t, "lang", config.CookieName)
 	assert.Equal(t, "X-Language", config.HeaderName)
-	assert.True(t, config.AcceptLanguage)
+	assert.False(t, config.DisableAcceptLanguage)
 	assert.Equal(t, []string{"query", "cookie", "header", "accept"}, config.Priority)
 	assert.Equal(t, DefaultLanguage, config.Default)
 }
@@ -60,8 +60,7 @@ func TestDetector_DetectFromRequest_Header(t *testing.T) {
 
 func TestDetector_DetectFromRequest_AcceptLanguage(t *testing.T) {
 	detector := NewDetector(DetectorConfig{
-		Priority:       []string{"accept"},
-		AcceptLanguage: true,
+		Priority: []string{"accept"},
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -72,8 +71,7 @@ func TestDetector_DetectFromRequest_AcceptLanguage(t *testing.T) {
 
 func TestDetector_DetectFromRequest_Priority(t *testing.T) {
 	detector := NewDetector(DetectorConfig{
-		Priority:       []string{"query", "cookie", "header", "accept"},
-		AcceptLanguage: true,
+		Priority: []string{"query", "cookie", "header", "accept"},
 	})
 
 	// Query takes priority
@@ -163,9 +161,9 @@ func TestDetectFromRequest_Convenience(t *testing.T) {
 
 func TestDetector_AcceptLanguageDisabled(t *testing.T) {
 	detector := NewDetector(DetectorConfig{
-		Priority:       []string{"accept"},
-		AcceptLanguage: false,
-		Default:        LangEN,
+		Priority:              []string{"accept"},
+		DisableAcceptLanguage: true,
+		Default:               LangEN,
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

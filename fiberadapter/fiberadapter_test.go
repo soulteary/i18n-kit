@@ -376,12 +376,11 @@ func TestMiddleware_CookieAttributes(t *testing.T) {
 	app := fiber.New()
 	app.Use(fiberadapter.Middleware(fiberadapter.Config{
 		MiddlewareConfig: i18n.MiddlewareConfig{
-			SetCookie:      true,
-			CookieName:     "site_lang",
-			CookieMaxAge:   60,
-			CookiePath:     "/app",
-			CookieSecure:   true,
-			CookieHTTPOnly: true,
+			SetCookie:    true,
+			CookieName:   "site_lang",
+			CookieMaxAge: 60,
+			CookiePath:   "/app",
+			CookieSecure: true,
 		},
 	}))
 	app.Get("/", func(c fiber.Ctx) error { return c.SendString("ok") })

@@ -75,14 +75,20 @@ func Middleware(config ...Config) fiber.Handler {
 		}
 
 		if cfg.SetCookie {
+			// Normalised in the root package rather than here: Fiber takes the
+			// attribute as a string and would otherwise interpret it itself,
+			// which is how "strict" came to mean Strict on Fiber and Lax on
+			// net/http. The four canonical spellings mean the same to both.
+			mode := i18n.ResolveCookieSameSite(cfg.CookieSameSite)
+
 			c.Cookie(&fiber.Cookie{
 				Name:     cfg.CookieName,
 				Value:    string(lang),
 				MaxAge:   cfg.CookieMaxAge,
 				Path:     cfg.CookiePath,
-				Secure:   cfg.CookieSecure,
-				HTTPOnly: cfg.CookieHTTPOnly,
-				SameSite: cfg.CookieSameSite,
+				Secure:   cfg.CookieSecure || mode.RequiresSecure(),
+				HTTPOnly: !cfg.DisableCookieHTTPOnly,
+				SameSite: string(mode),
 			})
 		}
 

@@ -21,9 +21,16 @@ type DetectorConfig struct {
 	// Default: "X-Language"
 	HeaderName string
 
-	// AcceptLanguage enables parsing of Accept-Language header.
-	// Default: true
-	AcceptLanguage bool
+	// DisableAcceptLanguage turns off parsing of the Accept-Language header.
+	//
+	// Negative so that the zero value is the documented default. As a plain
+	// AcceptLanguage bool it could not be told apart from "not set", so
+	// NewDetector could not fill it in the way it fills every other field, and
+	// NewDetector(DetectorConfig{}) kept "accept" in the default Priority while
+	// silently leaving the step switched off.
+	//
+	// Default: false, i.e. Accept-Language is parsed.
+	DisableAcceptLanguage bool
 
 	// Priority defines the order of detection methods.
 	// Available methods: "query", "cookie", "header", "accept"
@@ -38,12 +45,11 @@ type DetectorConfig struct {
 // DefaultDetectorConfig returns the default detector configuration.
 func DefaultDetectorConfig() DetectorConfig {
 	return DetectorConfig{
-		QueryParam:     "lang",
-		CookieName:     "lang",
-		HeaderName:     "X-Language",
-		AcceptLanguage: true,
-		Priority:       []string{"query", "cookie", "header", "accept"},
-		Default:        DefaultLanguage,
+		QueryParam: "lang",
+		CookieName: "lang",
+		HeaderName: "X-Language",
+		Priority:   []string{"query", "cookie", "header", "accept"},
+		Default:    DefaultLanguage,
 	}
 }
 
@@ -107,7 +113,7 @@ func (d *Detector) Detect(src RequestSource) Language {
 		case "header":
 			lang, found = parseDetected(src.Header(d.config.HeaderName))
 		case "accept":
-			if d.config.AcceptLanguage {
+			if !d.config.DisableAcceptLanguage {
 				if header := src.Header("Accept-Language"); header != "" {
 					lang, found = parseAcceptLanguage(header)
 				}

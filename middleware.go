@@ -34,11 +34,25 @@ type MiddlewareConfig struct {
 	// Default: false
 	CookieSecure bool
 
-	// CookieHTTPOnly sets the HttpOnly flag on the cookie.
-	// Default: true
-	CookieHTTPOnly bool
+	// DisableCookieHTTPOnly clears the HttpOnly flag on the cookie.
+	//
+	// Negative so that the zero value is the documented default. As a plain
+	// CookieHTTPOnly bool it could not be told apart from "not set", and the
+	// merge worked around that by guessing: it took the caller's value only
+	// once CookieName or CookieSameSite was also set, so naming the cookie and
+	// nothing else silently cleared HttpOnly. There is nothing to guess now.
+	//
+	// Default: false, i.e. the cookie is HttpOnly.
+	DisableCookieHTTPOnly bool
 
-	// CookieSameSite sets the SameSite attribute.
+	// CookieSameSite sets the SameSite attribute: "Lax", "Strict", "None" or
+	// "disabled" to omit the attribute. Matching is case-insensitive and an
+	// unrecognised value means "Lax"; see ResolveCookieSameSite, which every
+	// middleware uses so the frameworks cannot read it differently.
+	//
+	// "None" forces Secure on, because browsers reject the combination
+	// otherwise and the cookie is never stored.
+	//
 	// Default: "Lax"
 	CookieSameSite string
 
@@ -57,7 +71,6 @@ func DefaultMiddlewareConfig() MiddlewareConfig {
 		CookieMaxAge:   86400 * 365,
 		CookiePath:     "/",
 		CookieSecure:   false,
-		CookieHTTPOnly: true,
 		CookieSameSite: "Lax",
 		NextStd:        nil,
 	}
@@ -93,9 +106,9 @@ const (
 )
 
 // mergeConfig merges user config with defaults.
-// User-provided non-zero values override defaults.
-// For boolean fields like SetCookie and CookieSecure, we always take the user's value.
-// For CookieHTTPOnly, we keep the default (true) unless user explicitly provides cookie config.
+// User-provided non-zero values override defaults. Every bool is taken from the
+// caller as-is: each one is named so that its zero value is the default, which
+// is what lets the merge be this plain.
 func mergeConfig(defaults, user MiddlewareConfig) MiddlewareConfig {
 	result := defaults
 
@@ -118,12 +131,8 @@ func mergeConfig(defaults, user MiddlewareConfig) MiddlewareConfig {
 	}
 	// CookieSecure is a bool - take from user
 	result.CookieSecure = user.CookieSecure
-	// CookieHTTPOnly: We keep the default (true) unless user explicitly provides other cookie settings
-	// This is a pragmatic choice since HttpOnly=true is almost always what you want for security
-	// If user provides CookieName or CookieSameSite, we assume they want full control
-	if user.CookieName != "" || user.CookieSameSite != "" {
-		result.CookieHTTPOnly = user.CookieHTTPOnly
-	}
+	// DisableCookieHTTPOnly is a bool - take from user
+	result.DisableCookieHTTPOnly = user.DisableCookieHTTPOnly
 	if user.CookieSameSite != "" {
 		result.CookieSameSite = user.CookieSameSite
 	}
@@ -162,23 +171,23 @@ func StdMiddleware(config ...MiddlewareConfig) func(http.Handler) http.Handler {
 
 			// Set cookie if configured
 			if cfg.SetCookie {
-				sameSite := http.SameSiteLaxMode
-				switch cfg.CookieSameSite {
-				case "Strict":
-					sameSite = http.SameSiteStrictMode
-				case "None":
-					sameSite = http.SameSiteNoneMode
-				}
+				mode := ResolveCookieSameSite(cfg.CookieSameSite)
 
-				http.SetCookie(w, &http.Cookie{
+				cookie := &http.Cookie{
 					Name:     cfg.CookieName,
 					Value:    string(lang),
 					MaxAge:   cfg.CookieMaxAge,
 					Path:     cfg.CookiePath,
-					Secure:   cfg.CookieSecure,
-					HttpOnly: cfg.CookieHTTPOnly,
-					SameSite: sameSite,
-				})
+					Secure:   cfg.CookieSecure || mode.RequiresSecure(),
+					HttpOnly: !cfg.DisableCookieHTTPOnly,
+				}
+				// A zero SameSite writes no attribute, which is what
+				// SameSiteDisabled asks for.
+				if sameSite, ok := mode.HTTPSameSite(); ok {
+					cookie.SameSite = sameSite
+				}
+
+				http.SetCookie(w, cookie)
 			}
 
 			next.ServeHTTP(w, r)

@@ -238,3 +238,141 @@ func TestDetectParityWithDetectFromRequest(t *testing.T) {
 		assert.Equal(t, string(i18n.DetectFromRequest(newRequest(s))), string(body))
 	}
 }
+
+// Cookie parity. Detection was unified first; writing the cookie was still two
+// implementations reading MiddlewareConfig.CookieSameSite separately, and they
+// had already drifted -- "strict" meant Strict on Fiber and Lax on net/http,
+// and net/http emitted SameSite=None without Secure, which browsers reject, so
+// the language cookie was never stored. Both now resolve through
+// i18n.ResolveCookieSameSite, and this is what holds them together.
+
+func cookieViaNetHTTP(t *testing.T, cfg i18n.MiddlewareConfig) *http.Cookie {
+	t.Helper()
+
+	handler := i18n.StdMiddleware(cfg)(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?lang=zh", nil))
+
+	return findCookie(rec.Result().Cookies(), cfg.CookieName)
+}
+
+func cookieViaFiber(t *testing.T, cfg i18n.MiddlewareConfig) *http.Cookie {
+	t.Helper()
+
+	app := fiber.New()
+	app.Use(fiberadapter.Middleware(fiberadapter.Config{MiddlewareConfig: cfg}))
+	app.Get("/", func(c fiber.Ctx) error { return c.SendString("ok") })
+
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/?lang=zh", nil))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	return findCookie(resp.Cookies(), cfg.CookieName)
+}
+
+func findCookie(cookies []*http.Cookie, name string) *http.Cookie {
+	if name == "" {
+		name = "lang"
+	}
+	for _, c := range cookies {
+		if c.Name == name {
+			return c
+		}
+	}
+	return nil
+}
+
+func TestCookieParityWithNetHTTP(t *testing.T) {
+	tests := []struct {
+		name         string
+		sameSite     string
+		wantSameSite http.SameSite
+		wantSecure   bool
+	}{
+		{"empty means the Lax default", "", http.SameSiteLaxMode, false},
+		{"Lax", "Lax", http.SameSiteLaxMode, false},
+		{"Strict", "Strict", http.SameSiteStrictMode, false},
+		{"None forces Secure", "None", http.SameSiteNoneMode, true},
+		{"disabled writes no attribute", "disabled", 0, false},
+
+		// Case-insensitive on both sides. Fiber always folded case; net/http
+		// switched on the exact string and quietly fell through to Lax.
+		{"lowercase strict", "strict", http.SameSiteStrictMode, false},
+		{"lowercase none still forces Secure", "none", http.SameSiteNoneMode, true},
+		{"uppercase STRICT", "STRICT", http.SameSiteStrictMode, false},
+		{"mixed-case DiSaBlEd", "DiSaBlEd", 0, false},
+		{"surrounding space", "  Strict  ", http.SameSiteStrictMode, false},
+
+		// An unrecognised value must not reach a browser as a malformed
+		// attribute; both fall back to the default.
+		{"unrecognised falls back to Lax", "bogus", http.SameSiteLaxMode, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := i18n.MiddlewareConfig{SetCookie: true, CookieSameSite: tt.sameSite}
+
+			std := cookieViaNetHTTP(t, cfg)
+			fbr := cookieViaFiber(t, cfg)
+			require.NotNil(t, std, "net/http wrote no cookie")
+			require.NotNil(t, fbr, "Fiber wrote no cookie")
+
+			assert.Equal(t, tt.wantSameSite, std.SameSite, "net/http SameSite")
+			assert.Equal(t, std.SameSite, fbr.SameSite, "Fiber disagrees on SameSite")
+
+			assert.Equal(t, tt.wantSecure, std.Secure, "net/http Secure")
+			assert.Equal(t, std.Secure, fbr.Secure, "Fiber disagrees on Secure")
+
+			assert.Equal(t, "zh", std.Value)
+			assert.Equal(t, std.Value, fbr.Value)
+		})
+	}
+}
+
+// The rest of the cookie has to agree too, not just SameSite.
+func TestCookieAttributeParityWithNetHTTP(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  i18n.MiddlewareConfig
+	}{
+		{"defaults", i18n.MiddlewareConfig{SetCookie: true}},
+		{"custom name, path and max-age", i18n.MiddlewareConfig{
+			SetCookie: true, CookieName: "site_lang", CookiePath: "/app", CookieMaxAge: 60,
+		}},
+		{"secure", i18n.MiddlewareConfig{SetCookie: true, CookieSecure: true}},
+		{"HttpOnly switched off", i18n.MiddlewareConfig{SetCookie: true, DisableCookieHTTPOnly: true}},
+		{"naming the cookie leaves HttpOnly alone", i18n.MiddlewareConfig{SetCookie: true, CookieName: "site_lang"}},
+		{"Strict and secure together", i18n.MiddlewareConfig{
+			SetCookie: true, CookieSameSite: "Strict", CookieSecure: true, CookieName: "site_lang",
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			std := cookieViaNetHTTP(t, tt.cfg)
+			fbr := cookieViaFiber(t, tt.cfg)
+			require.NotNil(t, std)
+			require.NotNil(t, fbr)
+
+			assert.Equal(t, std.Name, fbr.Name, "Name")
+			assert.Equal(t, std.Value, fbr.Value, "Value")
+			assert.Equal(t, std.Path, fbr.Path, "Path")
+			assert.Equal(t, std.MaxAge, fbr.MaxAge, "MaxAge")
+			assert.Equal(t, std.Secure, fbr.Secure, "Secure")
+			assert.Equal(t, std.HttpOnly, fbr.HttpOnly, "HttpOnly")
+			assert.Equal(t, std.SameSite, fbr.SameSite, "SameSite")
+		})
+	}
+}
+
+// HttpOnly is on by default on both sides, and naming the cookie does not
+// quietly clear it the way the old merge heuristic did.
+func TestCookieHTTPOnlyParityWithNetHTTP(t *testing.T) {
+	onByDefault := i18n.MiddlewareConfig{SetCookie: true, CookieName: "site_lang", CookieSameSite: "Strict"}
+	assert.True(t, cookieViaNetHTTP(t, onByDefault).HttpOnly)
+	assert.True(t, cookieViaFiber(t, onByDefault).HttpOnly)
+
+	switchedOff := i18n.MiddlewareConfig{SetCookie: true, DisableCookieHTTPOnly: true}
+	assert.False(t, cookieViaNetHTTP(t, switchedOff).HttpOnly)
+	assert.False(t, cookieViaFiber(t, switchedOff).HttpOnly)
+}

@@ -45,6 +45,25 @@ A lightweight, flexible internationalization (i18n) library for Go applications.
 > One behaviour fix rides along: `TfFromFiber` discarded its arguments
 > entirely, so `"%s"` came out literal on Fiber while `TfFromContext`
 > formatted it correctly. `fiberadapter.Tf` formats.
+>
+> **Two config booleans were renamed so their zero value is the documented
+> default.** Both were plain positive bools that could not be told apart from
+> "not set", and both had a workaround that misfired:
+>
+> | Before | After | Why |
+> |---|---|---|
+> | `DetectorConfig.AcceptLanguage bool` (default `true`) | `DisableAcceptLanguage bool` | `NewDetector(DetectorConfig{})` kept `"accept"` in the default `Priority` while leaving the step off, so Accept-Language was silently ignored |
+> | `MiddlewareConfig.CookieHTTPOnly bool` (default `true`) | `DisableCookieHTTPOnly bool` | the merge took your value only once `CookieName` or `CookieSameSite` was set, so naming the cookie and nothing else silently cleared `HttpOnly` |
+>
+> Both renames are compile errors rather than silent behaviour changes, whichever
+> value you were setting.
+>
+> **`CookieSameSite` is now interpreted in one place** — `ResolveCookieSameSite`
+> — instead of once per framework. Matching is case-insensitive, `"disabled"`
+> omits the attribute, anything unrecognised means `"Lax"`, and `"None"` forces
+> `Secure` on. Previously `"strict"` meant `Strict` on Fiber and `Lax` on
+> net/http, and net/http emitted `SameSite=None` *without* `Secure`, which
+> browsers reject — so that cookie was never stored.
 
 ## Features
 
@@ -437,8 +456,7 @@ config := fiberadapter.Config{
         CookieMaxAge:   86400 * 365,           // 1 year
         CookiePath:     "/",
         CookieSecure:   true,
-        CookieHTTPOnly: true,
-        CookieSameSite: "Lax",
+        CookieSameSite: "Lax",           // Lax | Strict | None | disabled
     },
     Next: func(c fiber.Ctx) bool {             // Skip middleware
         return c.Path() == "/health"

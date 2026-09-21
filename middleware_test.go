@@ -19,7 +19,7 @@ func TestDefaultMiddlewareConfig(t *testing.T) {
 	assert.Equal(t, 86400*365, config.CookieMaxAge)
 	assert.Equal(t, "/", config.CookiePath)
 	assert.False(t, config.CookieSecure)
-	assert.True(t, config.CookieHTTPOnly)
+	assert.False(t, config.DisableCookieHTTPOnly)
 	assert.Equal(t, "Lax", config.CookieSameSite)
 }
 
@@ -206,7 +206,7 @@ func TestResolveMiddlewareConfig_ZeroConfigKeepsDefaults(t *testing.T) {
 	assert.Equal(t, 86400*365, cfg.CookieMaxAge)
 	assert.Equal(t, "/", cfg.CookiePath)
 	assert.Equal(t, "Lax", cfg.CookieSameSite)
-	assert.True(t, cfg.CookieHTTPOnly)
+	assert.False(t, cfg.DisableCookieHTTPOnly)
 	assert.False(t, cfg.SetCookie)
 	assert.False(t, cfg.CookieSecure)
 }
@@ -224,7 +224,6 @@ func TestResolveMiddlewareConfig_UserValuesOverrideDefaults(t *testing.T) {
 		CookieMaxAge:   60,
 		CookiePath:     "/app",
 		CookieSecure:   true,
-		CookieHTTPOnly: true,
 		CookieSameSite: "Strict",
 		NextStd:        nextStd,
 	})
@@ -236,7 +235,7 @@ func TestResolveMiddlewareConfig_UserValuesOverrideDefaults(t *testing.T) {
 	assert.Equal(t, 60, cfg.CookieMaxAge)
 	assert.Equal(t, "/app", cfg.CookiePath)
 	assert.True(t, cfg.CookieSecure)
-	assert.True(t, cfg.CookieHTTPOnly)
+	assert.False(t, cfg.DisableCookieHTTPOnly)
 	assert.Equal(t, "Strict", cfg.CookieSameSite)
 	require.NotNil(t, cfg.NextStd)
 	assert.True(t, cfg.NextStd(nil))
@@ -255,27 +254,28 @@ func TestResolveMiddlewareConfig_IgnoresExtraConfigs(t *testing.T) {
 	assert.Equal(t, "/", cfg.CookiePath)
 }
 
-// CookieHTTPOnly defaults to true and is only taken from the caller once the
-// caller has shown it is managing cookies, which mergeConfig infers from
-// CookieName or CookieSameSite being set. The upshot is a trap: naming the
-// cookie and nothing else silently turns HttpOnly off. Pinned so the rule the
-// adapters now share is explicit rather than folklore.
-func TestResolveMiddlewareConfig_CookieHTTPOnlyRule(t *testing.T) {
+// HttpOnly is on unless it is switched off, and nothing else a caller sets can
+// switch it off. It used to be inferred: mergeConfig took the caller's
+// CookieHTTPOnly only once CookieName or CookieSameSite was also set, so naming
+// the cookie and nothing else silently cleared the flag. That guess is gone
+// along with the field it worked around.
+func TestResolveMiddlewareConfig_HTTPOnlyRule(t *testing.T) {
 	tests := []struct {
 		name string
 		user MiddlewareConfig
 		want bool
 	}{
-		{"untouched keeps the secure default", MiddlewareConfig{}, true},
-		{"unrelated field keeps the default", MiddlewareConfig{CookieMaxAge: 60}, true},
-		{"naming the cookie hands control over", MiddlewareConfig{CookieName: "site_lang"}, false},
-		{"setting SameSite hands control over", MiddlewareConfig{CookieSameSite: "Strict"}, false},
-		{"and can then be asked for explicitly", MiddlewareConfig{CookieName: "site_lang", CookieHTTPOnly: true}, true},
+		{"untouched is HttpOnly", MiddlewareConfig{}, true},
+		{"an unrelated field does not clear it", MiddlewareConfig{CookieMaxAge: 60}, true},
+		{"naming the cookie does not clear it", MiddlewareConfig{CookieName: "site_lang"}, true},
+		{"setting SameSite does not clear it", MiddlewareConfig{CookieSameSite: "Strict"}, true},
+		{"setting several cookie fields does not clear it", MiddlewareConfig{CookieName: "site_lang", CookieSameSite: "Strict", CookiePath: "/app"}, true},
+		{"only asking clears it", MiddlewareConfig{DisableCookieHTTPOnly: true}, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, ResolveMiddlewareConfig(tt.user).CookieHTTPOnly)
+			assert.Equal(t, tt.want, !ResolveMiddlewareConfig(tt.user).DisableCookieHTTPOnly)
 		})
 	}
 }
@@ -283,9 +283,9 @@ func TestResolveMiddlewareConfig_CookieHTTPOnlyRule(t *testing.T) {
 // StdMiddleware must go through ResolveMiddlewareConfig rather than keeping its
 // own copy of the defaults: that equivalence is the whole point of exporting it.
 func TestStdMiddleware_UsesResolvedConfig(t *testing.T) {
-	cfg := ResolveMiddlewareConfig(MiddlewareConfig{SetCookie: true, CookieName: "site_lang", CookieHTTPOnly: true})
+	cfg := ResolveMiddlewareConfig(MiddlewareConfig{SetCookie: true, CookieName: "site_lang"})
 
-	handler := StdMiddleware(MiddlewareConfig{SetCookie: true, CookieName: "site_lang", CookieHTTPOnly: true})(
+	handler := StdMiddleware(MiddlewareConfig{SetCookie: true, CookieName: "site_lang"})(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 
 	rec := httptest.NewRecorder()
@@ -296,5 +296,5 @@ func TestStdMiddleware_UsesResolvedConfig(t *testing.T) {
 	assert.Equal(t, cfg.CookieName, cookies[0].Name)
 	assert.Equal(t, cfg.CookieMaxAge, cookies[0].MaxAge)
 	assert.Equal(t, cfg.CookiePath, cookies[0].Path)
-	assert.Equal(t, cfg.CookieHTTPOnly, cookies[0].HttpOnly)
+	assert.Equal(t, !cfg.DisableCookieHTTPOnly, cookies[0].HttpOnly)
 }
