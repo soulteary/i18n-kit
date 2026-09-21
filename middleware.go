@@ -2,8 +2,6 @@ package i18n
 
 import (
 	"net/http"
-
-	"github.com/gofiber/fiber/v3"
 )
 
 // MiddlewareConfig configures the i18n middleware.
@@ -44,10 +42,6 @@ type MiddlewareConfig struct {
 	// Default: "Lax"
 	CookieSameSite string
 
-	// Next defines a function to skip this middleware when true.
-	// Default: nil
-	Next func(c fiber.Ctx) bool
-
 	// NextStd defines a function to skip middleware for net/http when true.
 	// Default: nil
 	NextStd func(r *http.Request) bool
@@ -65,10 +59,30 @@ func DefaultMiddlewareConfig() MiddlewareConfig {
 		CookieSecure:   false,
 		CookieHTTPOnly: true,
 		CookieSameSite: "Lax",
-		Next:           nil,
 		NextStd:        nil,
 	}
 }
+
+// ResolveMiddlewareConfig turns a middleware's variadic config argument into
+// the effective configuration, applying the same defaults and the same merge
+// rules every middleware uses. Framework adapters call this instead of
+// restating the rules -- see the fiberadapter subpackage.
+func ResolveMiddlewareConfig(config ...MiddlewareConfig) MiddlewareConfig {
+	cfg := DefaultMiddlewareConfig()
+	if len(config) > 0 {
+		cfg = mergeConfig(cfg, config[0])
+	}
+	return cfg
+}
+
+// LocalsLanguageKey and LocalsBundleKey are the keys under which a framework
+// adapter stores the detected language and the bundle on its per-request
+// storage. They match the net/http context keys, so a value set by one
+// framework reads back the same way everywhere.
+const (
+	LocalsLanguageKey = "i18n-language"
+	LocalsBundleKey   = "i18n-bundle"
+)
 
 // mergeConfig merges user config with defaults.
 // User-provided non-zero values override defaults.
@@ -105,9 +119,6 @@ func mergeConfig(defaults, user MiddlewareConfig) MiddlewareConfig {
 	if user.CookieSameSite != "" {
 		result.CookieSameSite = user.CookieSameSite
 	}
-	if user.Next != nil {
-		result.Next = user.Next
-	}
 	if user.NextStd != nil {
 		result.NextStd = user.NextStd
 	}
@@ -115,81 +126,9 @@ func mergeConfig(defaults, user MiddlewareConfig) MiddlewareConfig {
 	return result
 }
 
-// FiberMiddleware creates a Fiber middleware for language detection.
-func FiberMiddleware(config ...MiddlewareConfig) fiber.Handler {
-	cfg := DefaultMiddlewareConfig()
-	if len(config) > 0 {
-		cfg = mergeConfig(cfg, config[0])
-	}
-
-	return func(c fiber.Ctx) error {
-		// Skip middleware if Next returns true
-		if cfg.Next != nil && cfg.Next(c) {
-			return c.Next()
-		}
-
-		// Detect language
-		lang := cfg.Detector.DetectFromFiber(c)
-
-		// Store in Fiber locals
-		c.Locals("i18n-language", lang)
-
-		// Store bundle if provided
-		if cfg.Bundle != nil {
-			c.Locals("i18n-bundle", cfg.Bundle)
-		}
-
-		// Set cookie if configured
-		if cfg.SetCookie {
-			c.Cookie(&fiber.Cookie{
-				Name:     cfg.CookieName,
-				Value:    string(lang),
-				MaxAge:   cfg.CookieMaxAge,
-				Path:     cfg.CookiePath,
-				Secure:   cfg.CookieSecure,
-				HTTPOnly: cfg.CookieHTTPOnly,
-				SameSite: cfg.CookieSameSite,
-			})
-		}
-
-		return c.Next()
-	}
-}
-
-// LanguageFromFiberLocals extracts the language from Fiber locals.
-func LanguageFromFiberLocals(c fiber.Ctx) Language {
-	if lang, ok := c.Locals("i18n-language").(Language); ok {
-		return lang
-	}
-	return DefaultLanguage
-}
-
-// BundleFromFiberLocals extracts the bundle from Fiber locals.
-func BundleFromFiberLocals(c fiber.Ctx) *Bundle {
-	if bundle, ok := c.Locals("i18n-bundle").(*Bundle); ok {
-		return bundle
-	}
-	return DefaultBundle
-}
-
-// TFromFiber returns the translated string using the language from Fiber context.
-func TFromFiber(c fiber.Ctx, key string) string {
-	bundle := BundleFromFiberLocals(c)
-	lang := LanguageFromFiberLocals(c)
-	return bundle.GetTranslation(lang, key)
-}
-
-// TfFromFiber returns a formatted translated string using the language from Fiber context.
-func TfFromFiber(c fiber.Ctx, key string, args ...interface{}) string {
-	return TFromFiber(c, key)
-}
-
 // StdMiddleware creates a net/http middleware for language detection.
 func StdMiddleware(config ...MiddlewareConfig) func(http.Handler) http.Handler {
-	cfg := DefaultMiddlewareConfig()
-	if len(config) > 0 {
-		cfg = mergeConfig(cfg, config[0])
-	}
+	cfg := ResolveMiddlewareConfig(config...)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -252,10 +191,4 @@ func StdMiddlewareFunc(config ...MiddlewareConfig) func(http.HandlerFunc) http.H
 // This is a convenience function for the common use case.
 func SimpleMiddleware() func(http.Handler) http.Handler {
 	return StdMiddleware(DefaultMiddlewareConfig())
-}
-
-// SimpleFiberMiddleware creates a simple Fiber middleware that only detects language.
-// This is a convenience function for the common use case.
-func SimpleFiberMiddleware() fiber.Handler {
-	return FiberMiddleware(DefaultMiddlewareConfig())
 }

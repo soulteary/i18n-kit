@@ -5,8 +5,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/gofiber/fiber/v3"
 )
 
 // DetectorConfig configures language detection behavior.
@@ -77,130 +75,88 @@ func NewDetector(config DetectorConfig) *Detector {
 // DefaultDetector is a detector with default configuration.
 var DefaultDetector = NewDetector(DefaultDetectorConfig())
 
+// RequestSource is the minimal view of an incoming request that detection
+// needs: three string lookups. Implementing it is all a framework adapter has
+// to do -- see the fiberadapter subpackage.
+//
+// It exists so the priority chain below has exactly one implementation. It used
+// to have two, one per framework, kept in step by hand; a method added to one
+// and forgotten in the other would have shown up as "detection works on
+// net/http but not on Fiber" and nothing else.
+type RequestSource interface {
+	// Query returns a URL query parameter, or "" when absent.
+	Query(name string) string
+	// Cookie returns a request cookie's value, or "" when absent.
+	Cookie(name string) string
+	// Header returns a request header, or "" when absent.
+	Header(name string) string
+}
+
+// Detect runs the configured priority chain against src and returns the first
+// valid language it finds, or the configured default.
+func (d *Detector) Detect(src RequestSource) Language {
+	for _, method := range d.config.Priority {
+		var lang Language
+		var found bool
+
+		switch method {
+		case "query":
+			lang, found = parseDetected(src.Query(d.config.QueryParam))
+		case "cookie":
+			lang, found = parseDetected(src.Cookie(d.config.CookieName))
+		case "header":
+			lang, found = parseDetected(src.Header(d.config.HeaderName))
+		case "accept":
+			if d.config.AcceptLanguage {
+				if header := src.Header("Accept-Language"); header != "" {
+					lang, found = parseAcceptLanguage(header)
+				}
+			}
+		}
+
+		if found && lang.IsValid() {
+			return lang
+		}
+	}
+
+	return d.config.Default
+}
+
+// parseDetected treats an absent value as "not found" rather than feeding an
+// empty string to ParseLanguage.
+func parseDetected(value string) (Language, bool) {
+	if value == "" {
+		return "", false
+	}
+	return ParseLanguage(value)
+}
+
 // DetectFromRequest detects language from a net/http request.
 func (d *Detector) DetectFromRequest(r *http.Request) Language {
-	for _, method := range d.config.Priority {
-		var lang Language
-		var found bool
-
-		switch method {
-		case "query":
-			lang, found = d.detectFromQueryStd(r)
-		case "cookie":
-			lang, found = d.detectFromCookieStd(r)
-		case "header":
-			lang, found = d.detectFromHeaderStd(r)
-		case "accept":
-			if d.config.AcceptLanguage {
-				lang, found = d.detectFromAcceptLanguageStd(r)
-			}
-		}
-
-		if found && lang.IsValid() {
-			return lang
-		}
-	}
-
-	return d.config.Default
+	return d.Detect(RequestSourceOf(r))
 }
 
-// DetectFromFiber detects language from a Fiber context.
-func (d *Detector) DetectFromFiber(c fiber.Ctx) Language {
-	for _, method := range d.config.Priority {
-		var lang Language
-		var found bool
+// RequestSourceOf adapts an *http.Request to RequestSource.
+func RequestSourceOf(r *http.Request) RequestSource { return stdSource{r: r} }
 
-		switch method {
-		case "query":
-			lang, found = d.detectFromQueryFiber(c)
-		case "cookie":
-			lang, found = d.detectFromCookieFiber(c)
-		case "header":
-			lang, found = d.detectFromHeaderFiber(c)
-		case "accept":
-			if d.config.AcceptLanguage {
-				lang, found = d.detectFromAcceptLanguageFiber(c)
-			}
-		}
+type stdSource struct{ r *http.Request }
 
-		if found && lang.IsValid() {
-			return lang
-		}
+func (s stdSource) Query(name string) string {
+	if s.r.URL == nil {
+		return ""
 	}
-
-	return d.config.Default
+	return s.r.URL.Query().Get(name)
 }
 
-// net/http detection methods
-
-func (d *Detector) detectFromQueryStd(r *http.Request) (Language, bool) {
-	if r.URL == nil {
-		return "", false
+func (s stdSource) Cookie(name string) string {
+	cookie, err := s.r.Cookie(name)
+	if err != nil {
+		return ""
 	}
-	value := r.URL.Query().Get(d.config.QueryParam)
-	if value == "" {
-		return "", false
-	}
-	return ParseLanguage(value)
+	return cookie.Value
 }
 
-func (d *Detector) detectFromCookieStd(r *http.Request) (Language, bool) {
-	cookie, err := r.Cookie(d.config.CookieName)
-	if err != nil || cookie.Value == "" {
-		return "", false
-	}
-	return ParseLanguage(cookie.Value)
-}
-
-func (d *Detector) detectFromHeaderStd(r *http.Request) (Language, bool) {
-	value := r.Header.Get(d.config.HeaderName)
-	if value == "" {
-		return "", false
-	}
-	return ParseLanguage(value)
-}
-
-func (d *Detector) detectFromAcceptLanguageStd(r *http.Request) (Language, bool) {
-	header := r.Header.Get("Accept-Language")
-	if header == "" {
-		return "", false
-	}
-	return parseAcceptLanguage(header)
-}
-
-// Fiber detection methods
-
-func (d *Detector) detectFromQueryFiber(c fiber.Ctx) (Language, bool) {
-	value := c.Query(d.config.QueryParam)
-	if value == "" {
-		return "", false
-	}
-	return ParseLanguage(value)
-}
-
-func (d *Detector) detectFromCookieFiber(c fiber.Ctx) (Language, bool) {
-	value := c.Cookies(d.config.CookieName)
-	if value == "" {
-		return "", false
-	}
-	return ParseLanguage(value)
-}
-
-func (d *Detector) detectFromHeaderFiber(c fiber.Ctx) (Language, bool) {
-	value := c.Get(d.config.HeaderName)
-	if value == "" {
-		return "", false
-	}
-	return ParseLanguage(value)
-}
-
-func (d *Detector) detectFromAcceptLanguageFiber(c fiber.Ctx) (Language, bool) {
-	header := c.Get("Accept-Language")
-	if header == "" {
-		return "", false
-	}
-	return parseAcceptLanguage(header)
-}
+func (s stdSource) Header(name string) string { return s.r.Header.Get(name) }
 
 // langWithQuality represents a language with its quality value.
 type langWithQuality struct {
@@ -263,9 +219,4 @@ func parseAcceptLanguage(header string) (Language, bool) {
 // DetectFromRequest is a convenience function using the default detector.
 func DetectFromRequest(r *http.Request) Language {
 	return DefaultDetector.DetectFromRequest(r)
-}
-
-// DetectFromFiber is a convenience function using the default detector.
-func DetectFromFiber(c fiber.Ctx) Language {
-	return DefaultDetector.DetectFromFiber(c)
 }

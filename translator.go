@@ -54,6 +54,16 @@ func (t *Translator) T(key string) string {
 	return t.bundle.GetTranslation(lang, key)
 }
 
+// FormatTranslation applies printf arguments to a looked-up translation, using
+// the same rule this package's own Tf* functions use: a missing key is returned
+// as-is and the arguments are NOT applied.
+//
+// Exported for framework adapters, which need Lookup + format as one unit to
+// implement a correct Tf -- see the fiberadapter subpackage.
+func FormatTranslation(text string, found bool, args ...interface{}) string {
+	return formatTranslation(text, found, args...)
+}
+
 // formatTranslation applies args to a translation.
 //
 // A translation is used as a printf format string, and GetTranslation returns

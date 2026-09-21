@@ -10,6 +10,30 @@
 
 [English Documentation](README.md)
 
+
+> **v2.3.0 破坏性变更 —— Fiber 支持移入子包。**
+> Fiber 入口现位于 `github.com/soulteary/i18n-kit/v2/fiberadapter`，
+> 于是导入根包不再把 Fiber（以及 fasthttp）链接进用不到它的二进制。
+> 对一个 net/http 服务来说，这意味着**少链接 25 个包、少 10 个模块、二进制小 25%**。
+>
+> | 原来 | 现在 |
+> |---|---|
+> | `i18n.FiberMiddleware(...)` | `fiberadapter.Middleware(...)` |
+> | `i18n.SimpleFiberMiddleware()` | `fiberadapter.SimpleMiddleware()` |
+> | `i18n.DetectFromFiber(c)` | `fiberadapter.Detect(c)` |
+> | `detector.DetectFromFiber(c)` | `fiberadapter.DetectWith(detector, c)` |
+> | `i18n.LanguageFromFiberLocals(c)` | `fiberadapter.Language(c)` |
+> | `i18n.BundleFromFiberLocals(c)` | `fiberadapter.Bundle(c)` |
+> | `i18n.TFromFiber(c, key)` | `fiberadapter.T(c, key)` |
+> | `i18n.TfFromFiber(c, key, args...)` | `fiberadapter.Tf(c, key, args...)` |
+>
+> `MiddlewareConfig.Next` 也跟着搬了：一个 `func(fiber.Ctx) bool` 字段正是把
+> Fiber 拖进根包的原因，现在它在 `fiberadapter.Config` 上，该结构体内嵌
+> `i18n.MiddlewareConfig`。`NextStd` 与 net/http 一侧没有任何变化。
+>
+> 顺带修掉一个行为缺陷：`TfFromFiber` 把参数整个丢掉，于是 `"%s"` 在 Fiber 侧
+> 原样输出，而 `TfFromContext` 是正常格式化的。`fiberadapter.Tf` 会格式化。
+
 ## 特性
 
 - **多语言支持**：内置支持 10+ 种语言（EN, ZH, FR, DE, JA, KO, IT, ES, PT, RU）
@@ -116,6 +140,7 @@ package main
 import (
     "github.com/gofiber/fiber/v3"
     i18n "github.com/soulteary/i18n-kit/v2"
+    "github.com/soulteary/i18n-kit/v2/fiberadapter"
 )
 
 func main() {
@@ -130,10 +155,10 @@ func main() {
     app := fiber.New()
 
     // 应用中间件
-    app.Use(i18n.FiberMiddleware())
+    app.Use(fiberadapter.Middleware())
 
     app.Get("/", func(c fiber.Ctx) error {
-        greeting := i18n.TFromFiber(c, "greeting")
+        greeting := fiberadapter.T(c, "greeting")
         return c.SendString(greeting)
     })
 
@@ -299,7 +324,7 @@ i18n.TfWithLang(i18n.LangZH, "greeting", "Alice", 30)
 i18n.TfFromRequest(r, "greeting", "Alice", 30)
 i18n.TfFromContext(ctx, "greeting", "Alice", 30)
 i18n.TfFromContextWithBundle(ctx, "greeting", "Alice", 30)
-i18n.TfFromFiber(c, "greeting", "Alice", 30)
+fiberadapter.Tf(c, "greeting", "Alice", 30)
 ```
 
 **译文缺失时返回未格式化的 key，并丢弃参数。** 这一点很重要，否则缺失的 key 会被当作
@@ -395,14 +420,14 @@ config := i18n.MiddlewareConfig{
     },
 }
 
-app.Use(i18n.FiberMiddleware(config))
+app.Use(fiberadapter.Middleware(config))
 ```
 
 ### 跳过特定路径
 
 ```go
 // Fiber
-config := i18n.MiddlewareConfig{
+config := fiberadapter.Config{
     Next: func(c fiber.Ctx) bool {
         return c.Path() == "/api/internal"
     },

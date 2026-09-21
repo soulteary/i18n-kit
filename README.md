@@ -12,6 +12,33 @@ A lightweight, flexible internationalization (i18n) library for Go applications.
 
 [中文文档](README_CN.md)
 
+
+> **Breaking in v2.3.0 — Fiber support moved to a subpackage.**
+> The Fiber entry points are now `github.com/soulteary/i18n-kit/v2/fiberadapter`,
+> so importing the root package no longer links Fiber (and fasthttp) into
+> binaries that never use it. In a net/http service that means **25 fewer
+> linked packages, 10 fewer modules and a 25% smaller binary**.
+>
+> | Before | After |
+> |---|---|
+> | `i18n.FiberMiddleware(...)` | `fiberadapter.Middleware(...)` |
+> | `i18n.SimpleFiberMiddleware()` | `fiberadapter.SimpleMiddleware()` |
+> | `i18n.DetectFromFiber(c)` | `fiberadapter.Detect(c)` |
+> | `detector.DetectFromFiber(c)` | `fiberadapter.DetectWith(detector, c)` |
+> | `i18n.LanguageFromFiberLocals(c)` | `fiberadapter.Language(c)` |
+> | `i18n.BundleFromFiberLocals(c)` | `fiberadapter.Bundle(c)` |
+> | `i18n.TFromFiber(c, key)` | `fiberadapter.T(c, key)` |
+> | `i18n.TfFromFiber(c, key, args...)` | `fiberadapter.Tf(c, key, args...)` |
+>
+> `MiddlewareConfig.Next` moved too: a `func(fiber.Ctx) bool` field is exactly
+> what pulled Fiber into the root package, so it now lives on
+> `fiberadapter.Config`, which embeds `i18n.MiddlewareConfig`. `NextStd` and
+> everything on the net/http side are unchanged.
+>
+> One behaviour fix rides along: `TfFromFiber` discarded its arguments
+> entirely, so `"%s"` came out literal on Fiber while `TfFromContext`
+> formatted it correctly. `fiberadapter.Tf` formats.
+
 ## Features
 
 - **Multiple Language Support**: Built-in support for 10+ languages (EN, ZH, FR, DE, JA, KO, IT, ES, PT, RU)
@@ -118,6 +145,7 @@ package main
 import (
     "github.com/gofiber/fiber/v3"
     i18n "github.com/soulteary/i18n-kit/v2"
+    "github.com/soulteary/i18n-kit/v2/fiberadapter"
 )
 
 func main() {
@@ -132,10 +160,10 @@ func main() {
     app := fiber.New()
 
     // Apply middleware
-    app.Use(i18n.FiberMiddleware())
+    app.Use(fiberadapter.Middleware())
 
     app.Get("/", func(c fiber.Ctx) error {
-        greeting := i18n.TFromFiber(c, "greeting")
+        greeting := fiberadapter.T(c, "greeting")
         return c.SendString(greeting)
     })
 
@@ -307,7 +335,7 @@ i18n.TfWithLang(i18n.LangZH, "greeting", "Alice", 30)
 i18n.TfFromRequest(r, "greeting", "Alice", 30)
 i18n.TfFromContext(ctx, "greeting", "Alice", 30)
 i18n.TfFromContextWithBundle(ctx, "greeting", "Alice", 30)
-i18n.TfFromFiber(c, "greeting", "Alice", 30)
+fiberadapter.Tf(c, "greeting", "Alice", 30)
 ```
 
 **When the translation is missing, the key is returned unformatted and the
@@ -392,29 +420,31 @@ func handler(w http.ResponseWriter, r *http.Request) {
 ### Full Configuration
 
 ```go
-config := i18n.MiddlewareConfig{
-    Detector:       i18n.DefaultDetector,  // Language detector
-    Bundle:         myBundle,              // Custom bundle (optional)
-    SetCookie:      true,                  // Set language cookie
-    CookieName:     "lang",
-    CookieMaxAge:   86400 * 365,           // 1 year
-    CookiePath:     "/",
-    CookieSecure:   true,
-    CookieHTTPOnly: true,
-    CookieSameSite: "Lax",
-    Next: func(c fiber.Ctx) bool {        // Skip middleware
+config := fiberadapter.Config{
+    MiddlewareConfig: i18n.MiddlewareConfig{
+        Detector:       i18n.DefaultDetector,  // Language detector
+        Bundle:         myBundle,              // Custom bundle (optional)
+        SetCookie:      true,                  // Set language cookie
+        CookieName:     "lang",
+        CookieMaxAge:   86400 * 365,           // 1 year
+        CookiePath:     "/",
+        CookieSecure:   true,
+        CookieHTTPOnly: true,
+        CookieSameSite: "Lax",
+    },
+    Next: func(c fiber.Ctx) bool {             // Skip middleware
         return c.Path() == "/health"
     },
 }
 
-app.Use(i18n.FiberMiddleware(config))
+app.Use(fiberadapter.Middleware(config))
 ```
 
 ### Skip Middleware for Specific Paths
 
 ```go
 // For Fiber
-config := i18n.MiddlewareConfig{
+config := fiberadapter.Config{
     Next: func(c fiber.Ctx) bool {
         return c.Path() == "/api/internal"
     },
