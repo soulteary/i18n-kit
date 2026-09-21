@@ -1,5 +1,14 @@
 // Package i18n provides internationalization for Go applications: translation
-// bundles, language detection from HTTP requests, and net/http middleware.
+// bundles, language lookup and formatting, and the request-language detection
+// chain that the adapter subpackages drive.
+//
+// It depends on nothing outside the standard library, and since v4 it does not
+// import net/http either -- translation is just as useful in a CLI printing
+// localized help, and net/http costs such a binary well over a hundred packages
+// it has no use for. The handlers, the middleware and the *http.Request helpers
+// live in the httpadapter subpackage; YAML translation files live in
+// yamlloader, because JSON needs only the standard library and most
+// translation sets are JSON.
 //
 // # Framework support
 //
@@ -13,9 +22,9 @@
 //		Header(name string) string
 //	}
 //
-// [StdMiddleware] covers net/http, and the fiberadapter subpackage covers
-// Fiber v3. Importing this package does not link Fiber; only importing
-// fiberadapter does. For another framework, implement RequestSource and read
+// The httpadapter subpackage covers net/http and fiberadapter covers Fiber v3.
+// Importing this package links neither; only importing the adapter does. For
+// another framework, implement RequestSource and read
 // the shared rules from here rather than restating them: [ResolveMiddlewareConfig]
 // for config defaults, [ResolveCookieSameSite] for the cookie attribute,
 // [FormatTranslation] for the missing-key rule, and [LocalsLanguageKey] /

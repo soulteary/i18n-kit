@@ -3,6 +3,7 @@ package i18n
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -133,28 +134,6 @@ func TestBundle_LoadJSON_Invalid(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestBundle_LoadYAML(t *testing.T) {
-	bundle := NewBundle(LangEN)
-	yamlData := []byte(`
-greeting: Hello
-farewell: Goodbye
-`)
-
-	err := bundle.LoadYAML(LangEN, yamlData)
-	require.NoError(t, err)
-
-	assert.Equal(t, "Hello", bundle.GetTranslation(LangEN, "greeting"))
-	assert.Equal(t, "Goodbye", bundle.GetTranslation(LangEN, "farewell"))
-}
-
-func TestBundle_LoadYAML_Invalid(t *testing.T) {
-	bundle := NewBundle(LangEN)
-	yamlData := []byte(`invalid: [yaml`)
-
-	err := bundle.LoadYAML(LangEN, yamlData)
-	assert.Error(t, err)
-}
-
 func TestBundle_LoadJSONFile(t *testing.T) {
 	// Create temp file
 	tmpDir := t.TempDir()
@@ -173,46 +152,6 @@ func TestBundle_LoadJSONFile_NotFound(t *testing.T) {
 	bundle := NewBundle(LangEN)
 	err := bundle.LoadJSONFile(LangEN, "/nonexistent/file.json")
 	assert.Error(t, err)
-}
-
-func TestBundle_LoadYAMLFile(t *testing.T) {
-	// Create temp file
-	tmpDir := t.TempDir()
-	filePath := filepath.Join(tmpDir, "en.yaml")
-	err := os.WriteFile(filePath, []byte("greeting: Hello"), 0600)
-	require.NoError(t, err)
-
-	bundle := NewBundle(LangEN)
-	err = bundle.LoadYAMLFile(LangEN, filePath)
-	require.NoError(t, err)
-
-	assert.Equal(t, "Hello", bundle.GetTranslation(LangEN, "greeting"))
-}
-
-func TestBundle_LoadDirectory(t *testing.T) {
-	// Create temp directory with translation files
-	tmpDir := t.TempDir()
-
-	err := os.WriteFile(filepath.Join(tmpDir, "en.json"), []byte(`{"greeting": "Hello"}`), 0600)
-	require.NoError(t, err)
-
-	err = os.WriteFile(filepath.Join(tmpDir, "zh.yaml"), []byte("greeting: 你好"), 0600)
-	require.NoError(t, err)
-
-	// Create a file that should be skipped (unknown language)
-	err = os.WriteFile(filepath.Join(tmpDir, "unknown.json"), []byte(`{"greeting": "?"}`), 0600)
-	require.NoError(t, err)
-
-	// Create a non-translation file that should be skipped
-	err = os.WriteFile(filepath.Join(tmpDir, "readme.txt"), []byte("readme"), 0600)
-	require.NoError(t, err)
-
-	bundle := NewBundle(LangEN)
-	err = bundle.LoadDirectory(tmpDir)
-	require.NoError(t, err)
-
-	assert.Equal(t, "Hello", bundle.GetTranslation(LangEN, "greeting"))
-	assert.Equal(t, "你好", bundle.GetTranslation(LangZH, "greeting"))
 }
 
 func TestBundle_LoadDirectory_NotFound(t *testing.T) {
@@ -256,4 +195,96 @@ func TestBundle_Clone(t *testing.T) {
 func TestDefaultBundle(t *testing.T) {
 	assert.NotNil(t, DefaultBundle)
 	assert.Equal(t, LangEN, DefaultBundle.GetFallback())
+}
+
+// TestLoadDirectory_JSONOnly is the root package's half of the v4 split: it
+// loads .json and skips what it does not recognise, exactly as before.
+func TestLoadDirectory_JSONOnly(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("en.json", `{"greeting": "Hello"}`)
+	write("zh.json", `{"greeting": "你好"}`)
+	write("unknown.json", `{"greeting": "?"}`) // not a language, skipped
+	write("readme.txt", "readme")              // not a translation file, skipped
+
+	bundle := NewBundle(LangEN)
+	if err := bundle.LoadDirectory(dir); err != nil {
+		t.Fatalf("LoadDirectory: %v", err)
+	}
+
+	if got := bundle.GetTranslation(LangEN, "greeting"); got != "Hello" {
+		t.Errorf("en greeting = %q, want Hello", got)
+	}
+	if got := bundle.GetTranslation(LangZH, "greeting"); got != "你好" {
+		t.Errorf("zh greeting = %q, want 你好", got)
+	}
+}
+
+// TestLoadDirectory_RejectsYAMLLoudly pins the one behaviour change in v4.
+//
+// Skipping the YAML files would have been the quiet option and the wrong one:
+// a directory of YAML translations would load as an empty bundle, every lookup
+// would fall back to its key, and nobody would find out until a page of
+// untranslated strings reached someone. The error names the fix.
+func TestLoadDirectory_RejectsYAMLLoudly(t *testing.T) {
+	for _, name := range []string{"zh.yaml", "zh.yml"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, name), []byte("greeting: 你好"), 0600); err != nil {
+				t.Fatal(err)
+			}
+
+			err := NewBundle(LangEN).LoadDirectory(dir)
+			if err == nil {
+				t.Fatal("LoadDirectory returned nil for a directory of YAML, want an error")
+			}
+			if !strings.Contains(err.Error(), "yamlloader") {
+				t.Errorf("error = %q, want it to name the yamlloader subpackage", err)
+			}
+		})
+	}
+}
+
+// TestLoadDirectoryWith_CustomFormat is the extension point that lets
+// yamlloader exist without this package importing a YAML library -- and lets
+// anyone else add TOML or .properties on the same terms.
+func TestLoadDirectoryWith_CustomFormat(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "en.txt"), []byte("greeting=Hello"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := func(data []byte) (map[string]string, error) {
+		k, v, _ := strings.Cut(string(data), "=")
+		return map[string]string{k: v}, nil
+	}
+
+	bundle := NewBundle(LangEN)
+	if err := bundle.LoadDirectoryWith(dir, map[string]Decoder{".txt": lines}); err != nil {
+		t.Fatalf("LoadDirectoryWith: %v", err)
+	}
+	if got := bundle.GetTranslation(LangEN, "greeting"); got != "Hello" {
+		t.Errorf("greeting = %q, want Hello", got)
+	}
+}
+
+// TestLoadDirectoryWith_DecodeError reports which file failed, not just that
+// something did.
+func TestLoadDirectoryWith_DecodeError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "en.json"), []byte("{not json"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := NewBundle(LangEN).LoadDirectory(dir)
+	if err == nil {
+		t.Fatal("LoadDirectory returned nil for malformed JSON, want an error")
+	}
+	if !strings.Contains(err.Error(), "en.json") {
+		t.Errorf("error = %q, want it to name en.json", err)
+	}
 }

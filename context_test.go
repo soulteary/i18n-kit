@@ -2,8 +2,6 @@ package i18n
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -49,25 +47,6 @@ func TestLanguageFromContextOK(t *testing.T) {
 	assert.Empty(t, lang)
 }
 
-func TestSetLanguageInRequest(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req = SetLanguageInRequest(req, LangFR)
-
-	lang := LanguageFromRequest(req)
-	assert.Equal(t, LangFR, lang)
-}
-
-func TestLanguageFromRequest_Nil(t *testing.T) {
-	lang := LanguageFromRequest(nil)
-	assert.Equal(t, DefaultLanguage, lang)
-}
-
-func TestLanguageFromRequest_NoValue(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	lang := LanguageFromRequest(req)
-	assert.Equal(t, DefaultLanguage, lang)
-}
-
 func TestTFromContext(t *testing.T) {
 	defer DefaultBundle.Clear()
 
@@ -86,31 +65,6 @@ func TestTfFromContext(t *testing.T) {
 
 	ctx := ContextWithLanguage(context.Background(), LangZH)
 	result := TfFromContext(ctx, "greeting", "世界")
-	assert.Equal(t, "你好, 世界!", result)
-}
-
-func TestTFromRequest(t *testing.T) {
-	defer DefaultBundle.Clear()
-
-	DefaultBundle.AddTranslation(LangEN, "greeting", "Hello")
-	DefaultBundle.AddTranslation(LangZH, "greeting", "你好")
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req = SetLanguageInRequest(req, LangZH)
-
-	result := TFromRequest(req, "greeting")
-	assert.Equal(t, "你好", result)
-}
-
-func TestTfFromRequest(t *testing.T) {
-	defer DefaultBundle.Clear()
-
-	DefaultBundle.AddTranslation(LangZH, "greeting", "你好, %s!")
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req = SetLanguageInRequest(req, LangZH)
-
-	result := TfFromRequest(req, "greeting", "世界")
 	assert.Equal(t, "你好, 世界!", result)
 }
 

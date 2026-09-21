@@ -1,7 +1,6 @@
 package i18n
 
 import (
-	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -137,33 +136,6 @@ func parseDetected(value string) (Language, bool) {
 	return ParseLanguage(value)
 }
 
-// DetectFromRequest detects language from a net/http request.
-func (d *Detector) DetectFromRequest(r *http.Request) Language {
-	return d.Detect(RequestSourceOf(r))
-}
-
-// RequestSourceOf adapts an *http.Request to RequestSource.
-func RequestSourceOf(r *http.Request) RequestSource { return stdSource{r: r} }
-
-type stdSource struct{ r *http.Request }
-
-func (s stdSource) Query(name string) string {
-	if s.r.URL == nil {
-		return ""
-	}
-	return s.r.URL.Query().Get(name)
-}
-
-func (s stdSource) Cookie(name string) string {
-	cookie, err := s.r.Cookie(name)
-	if err != nil {
-		return ""
-	}
-	return cookie.Value
-}
-
-func (s stdSource) Header(name string) string { return s.r.Header.Get(name) }
-
 // langWithQuality represents a language with its quality value.
 type langWithQuality struct {
 	lang    string
@@ -220,9 +192,4 @@ func parseAcceptLanguage(header string) (Language, bool) {
 	}
 
 	return "", false
-}
-
-// DetectFromRequest is a convenience function using the default detector.
-func DetectFromRequest(r *http.Request) Language {
-	return DefaultDetector.DetectFromRequest(r)
 }

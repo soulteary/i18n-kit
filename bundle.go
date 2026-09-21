@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-
-	"gopkg.in/yaml.v3"
 )
 
 // Bundle manages translations for multiple languages.
@@ -189,20 +187,9 @@ func (b *Bundle) ClearLanguage(lang Language) {
 // LoadJSON loads translations from a JSON byte slice.
 // The JSON should be an object with string keys and string values.
 func (b *Bundle) LoadJSON(lang Language, data []byte) error {
-	var translations map[string]string
-	if err := json.Unmarshal(data, &translations); err != nil {
-		return fmt.Errorf("failed to parse JSON: %w", err)
-	}
-	b.AddTranslations(lang, translations)
-	return nil
-}
-
-// LoadYAML loads translations from a YAML byte slice.
-// The YAML should be a mapping of string keys to string values.
-func (b *Bundle) LoadYAML(lang Language, data []byte) error {
-	var translations map[string]string
-	if err := yaml.Unmarshal(data, &translations); err != nil {
-		return fmt.Errorf("failed to parse YAML: %w", err)
+	translations, err := DecodeJSON(data)
+	if err != nil {
+		return err
 	}
 	b.AddTranslations(lang, translations)
 	return nil
@@ -217,19 +204,45 @@ func (b *Bundle) LoadJSONFile(lang Language, path string) error {
 	return b.LoadJSON(lang, data)
 }
 
-// LoadYAMLFile loads translations from a YAML file.
-func (b *Bundle) LoadYAMLFile(lang Language, path string) error {
-	data, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return fmt.Errorf("failed to read file: %w", err)
+// Decoder parses one translation file's bytes into a flat key/value map.
+//
+// It exists so that LoadDirectoryWith can walk a directory without this package
+// knowing every format: the yamlloader subpackage supplies a YAML Decoder, and
+// nothing here has to import a YAML library to make that work. Anyone wanting
+// TOML or .properties writes twenty lines and needs no change here either.
+type Decoder func(data []byte) (map[string]string, error)
+
+// DecodeJSON is the Decoder LoadDirectory uses for ".json" files.
+func DecodeJSON(data []byte) (map[string]string, error) {
+	var translations map[string]string
+	if err := json.Unmarshal(data, &translations); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON: %w", err)
 	}
-	return b.LoadYAML(lang, data)
+	return translations, nil
 }
 
-// LoadDirectory loads all translation files from a directory.
-// Files should be named as "{language}.json" or "{language}.yaml".
-// For example: "en.json", "zh.yaml", "fr-FR.json", etc.
+// LoadDirectory loads all JSON translation files from a directory.
+// Files should be named as "{language}.json" -- for example "en.json",
+// "fr-FR.json".
+//
+// YAML is not built in: it would mean importing a YAML library into every
+// program that imports this package, including the ones whose translations are
+// all JSON. A directory containing .yaml or .yml files is reported as an error
+// naming the fix rather than silently loaded at half strength -- use
+// yamlloader.LoadDirectory, which understands all three extensions.
 func (b *Bundle) LoadDirectory(dir string) error {
+	return b.LoadDirectoryWith(dir, map[string]Decoder{".json": DecodeJSON})
+}
+
+// LoadDirectoryWith is LoadDirectory with the set of extensions it understands
+// given explicitly, keyed by lowercase extension including the dot.
+//
+// Files whose extension is absent from decoders are skipped, as are files whose
+// name is not a language this package knows -- with one exception: .yaml and
+// .yml are reported as an error when no decoder covers them, because a
+// directory of YAML translations loading as an empty bundle is the kind of
+// quiet failure that reaches production.
+func (b *Bundle) LoadDirectoryWith(dir string, decoders map[string]Decoder) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return fmt.Errorf("failed to read directory: %w", err)
@@ -242,7 +255,12 @@ func (b *Bundle) LoadDirectory(dir string) error {
 
 		name := entry.Name()
 		ext := strings.ToLower(filepath.Ext(name))
-		if ext != ".json" && ext != ".yaml" && ext != ".yml" {
+		decode, ok := decoders[ext]
+		if !ok {
+			if ext == ".yaml" || ext == ".yml" {
+				return fmt.Errorf("%s: YAML translations need the yamlloader subpackage"+
+					" -- call yamlloader.LoadDirectory(bundle, dir) instead", name)
+			}
 			continue
 		}
 
@@ -253,17 +271,15 @@ func (b *Bundle) LoadDirectory(dir string) error {
 			continue
 		}
 
-		path := filepath.Join(dir, name)
-		switch ext {
-		case ".json":
-			if err := b.LoadJSONFile(lang, path); err != nil {
-				return fmt.Errorf("failed to load %s: %w", name, err)
-			}
-		case ".yaml", ".yml":
-			if err := b.LoadYAMLFile(lang, path); err != nil {
-				return fmt.Errorf("failed to load %s: %w", name, err)
-			}
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return fmt.Errorf("failed to load %s: failed to read file: %w", name, err)
 		}
+		translations, err := decode(data)
+		if err != nil {
+			return fmt.Errorf("failed to load %s: %w", name, err)
+		}
+		b.AddTranslations(lang, translations)
 	}
 
 	return nil
