@@ -204,22 +204,42 @@ The library supports multiple detection methods with configurable priority:
 
 ```go
 config := i18n.DetectorConfig{
-    QueryParam:     "lang",           // Query parameter name
-    CookieName:     "lang",           // Cookie name
-    HeaderName:     "X-Language",     // Custom header name
-    AcceptLanguage: true,             // Parse Accept-Language header
-    Priority:       []string{"query", "cookie", "header", "accept"},
-    Default:        i18n.LangEN,      // Fallback language
+    QueryParam: "lang",           // Query parameter name
+    CookieName: "lang",           // Cookie name
+    HeaderName: "X-Language",     // Custom header name
+    Priority:   []string{"query", "cookie", "header", "accept"},
+    Default:    i18n.LangEN,      // Fallback language
+
+    // DisableAcceptLanguage: true,  // opt out of Accept-Language parsing
 }
 
 detector := i18n.NewDetector(config)
 ```
+
+Every field above has a usable zero value, so `i18n.DetectorConfig{}` behaves
+exactly as `i18n.DefaultDetectorConfig()` does — set only what you want to
+change.
 
 Detection priority (default order):
 1. Query parameter (`?lang=zh`)
 2. Cookie (`lang=zh`)
 3. Custom header (`X-Language: zh`)
 4. Accept-Language header (`Accept-Language: zh-CN,zh;q=0.9`)
+
+Removing a method from `Priority` skips it entirely — it is never even read.
+`DisableAcceptLanguage` is the separate switch for the last step, so you can
+leave `"accept"` in the list and still turn the parsing off.
+
+A detector runs against anything that can answer three questions, not just an
+`*http.Request`:
+
+```go
+lang := detector.DetectFromRequest(r)             // net/http
+lang := detector.Detect(i18n.RequestSourceOf(r))  // the same thing, spelled out
+lang := detector.Detect(mySource)                 // any i18n.RequestSource
+```
+
+See [Adapting Another Framework](#adapting-another-framework).
 
 ## Translation Bundles
 
@@ -466,6 +486,25 @@ config := fiberadapter.Config{
 app.Use(fiberadapter.Middleware(config))
 ```
 
+Like `DetectorConfig`, every field has a usable zero value: `SetCookie` is off,
+and when it is on the cookie is `HttpOnly` unless you set
+`DisableCookieHTTPOnly`.
+
+`CookieSameSite` is interpreted in exactly one place — `i18n.ResolveCookieSameSite`
+— so every framework reads it the same way:
+
+| Value | Result |
+|---|---|
+| `"Lax"` (default) | `SameSite=Lax` |
+| `"Strict"` | `SameSite=Strict` |
+| `"None"` | `SameSite=None`, and `Secure` is forced on |
+| `"disabled"` | no `SameSite` attribute at all |
+| anything else | `Lax` |
+
+Matching is case-insensitive and surrounding whitespace is ignored. `"None"`
+forces `Secure` because browsers reject the combination without it — the cookie
+would simply never be stored.
+
 ### Skip Middleware for Specific Paths
 
 ```go
@@ -483,6 +522,126 @@ config := i18n.MiddlewareConfig{
     },
 }
 ```
+
+## Adapting Another Framework
+
+Detection is one chain over a three-method interface, so an adapter for Echo,
+Gin, chi or anything else only has to say where a query parameter, a cookie and
+a header come from:
+
+```go
+type RequestSource interface {
+    Query(name string) string
+    Cookie(name string) string
+    Header(name string) string
+}
+```
+
+Everything else — the priority order, the config defaults, the `SameSite`
+rules, the missing-key rule for `Tf` — is read from the root package rather
+than restated, so a new adapter cannot drift from the built-in ones:
+
+| What you need | What to call |
+|---|---|
+| Run the detection chain | `detector.Detect(src)` |
+| Apply the config defaults and merge rules | `i18n.ResolveMiddlewareConfig(cfg...)` |
+| Interpret `CookieSameSite` | `i18n.ResolveCookieSameSite(value)` |
+| Implement `Tf` correctly | `bundle.LookupTranslation(...)` + `i18n.FormatTranslation(...)` |
+| Adapt an `*http.Request` | `i18n.RequestSourceOf(r)` |
+| Agree on where to store the result | `i18n.LocalsLanguageKey`, `i18n.LocalsBundleKey` |
+
+A complete adapter, for Echo:
+
+```go
+package echoadapter
+
+import (
+    "net/http"
+
+    "github.com/labstack/echo/v4"
+    i18n "github.com/soulteary/i18n-kit/v3"
+)
+
+type Source struct{ C echo.Context }
+
+func (s Source) Query(name string) string { return s.C.QueryParam(name) }
+
+func (s Source) Cookie(name string) string {
+    cookie, err := s.C.Cookie(name)
+    if err != nil {
+        return ""
+    }
+    return cookie.Value
+}
+
+func (s Source) Header(name string) string { return s.C.Request().Header.Get(name) }
+
+func Middleware(config ...i18n.MiddlewareConfig) echo.MiddlewareFunc {
+    cfg := i18n.ResolveMiddlewareConfig(config...)
+
+    return func(next echo.HandlerFunc) echo.HandlerFunc {
+        return func(c echo.Context) error {
+            lang := cfg.Detector.Detect(Source{C: c})
+            c.Set(i18n.LocalsLanguageKey, lang)
+
+            if cfg.Bundle != nil {
+                c.Set(i18n.LocalsBundleKey, cfg.Bundle)
+            }
+
+            if cfg.SetCookie {
+                mode := i18n.ResolveCookieSameSite(cfg.CookieSameSite)
+                cookie := &http.Cookie{
+                    Name:     cfg.CookieName,
+                    Value:    string(lang),
+                    MaxAge:   cfg.CookieMaxAge,
+                    Path:     cfg.CookiePath,
+                    Secure:   cfg.CookieSecure || mode.RequiresSecure(),
+                    HttpOnly: !cfg.DisableCookieHTTPOnly,
+                }
+                if sameSite, ok := mode.HTTPSameSite(); ok {
+                    cookie.SameSite = sameSite
+                }
+                c.SetCookie(cookie)
+            }
+
+            return next(c)
+        }
+    }
+}
+
+func Language(c echo.Context) i18n.Language {
+    if lang, ok := c.Get(i18n.LocalsLanguageKey).(i18n.Language); ok {
+        return lang
+    }
+    return i18n.DefaultLanguage
+}
+
+func Bundle(c echo.Context) *i18n.Bundle {
+    if bundle, ok := c.Get(i18n.LocalsBundleKey).(*i18n.Bundle); ok {
+        return bundle
+    }
+    return i18n.DefaultBundle
+}
+
+func T(c echo.Context, key string) string {
+    return Bundle(c).GetTranslation(Language(c), key)
+}
+
+func Tf(c echo.Context, key string, args ...interface{}) string {
+    text, found := Bundle(c).LookupTranslation(Language(c), key)
+    return i18n.FormatTranslation(text, found, args...)
+}
+```
+
+`fiberadapter` is the same shape and is worth reading as a reference.
+
+> **A framework's per-request store is not a `context.Context`.**
+> `LocalsLanguageKey` and `LocalsBundleKey` are plain strings, while this
+> package's context keys have an unexported type — so a language stored under
+> `LocalsLanguageKey` does **not** read back through `i18n.LanguageFromContext`,
+> and `i18n.TFromContext` would answer in the default language without
+> reporting anything. Read it back with your adapter's own accessor, or call
+> `i18n.ContextWithLanguage` yourself if you want the context helpers to see it.
 
 ## Supported Languages
 
@@ -527,6 +686,45 @@ All components are thread-safe:
 - `Bundle`: Safe for concurrent reads and writes
 - `Translator`: Safe for concurrent use
 - Global functions: Protected by mutex
+
+## Upgrade Notes (v3.0.0)
+
+A mechanical checklist; the notice at the top of this file explains the
+reasoning behind each one.
+
+1. **Change the import path** to `github.com/soulteary/i18n-kit/v3`. Because
+   the path changed, v2.2.0 keeps working untouched — nothing upgrades you by
+   accident.
+2. **Re-point the Fiber entry points** at
+   `github.com/soulteary/i18n-kit/v3/fiberadapter` (see the table in the notice
+   above). Nothing on the net/http side moved.
+3. **Move `MiddlewareConfig.Next`** onto `fiberadapter.Config`, which embeds
+   `i18n.MiddlewareConfig`. `NextStd` is unchanged.
+4. **Rename two booleans**, both of which now default correctly when left alone:
+
+   | Before | After |
+   |---|---|
+   | `DetectorConfig.AcceptLanguage: true` | *(delete the line — that is the default)* |
+   | `DetectorConfig.AcceptLanguage: false` | `DisableAcceptLanguage: true` |
+   | `MiddlewareConfig.CookieHTTPOnly: true` | *(delete the line — that is the default)* |
+   | `MiddlewareConfig.CookieHTTPOnly: false` | `DisableCookieHTTPOnly: true` |
+
+   Every spelling of the old fields is a compile error, so nothing changes
+   behaviour silently.
+
+Two behaviours change output:
+
+- **`Tf` on Fiber now applies its arguments.** `TfFromFiber` discarded them
+  entirely, so `"%s"` came out literal while `TfFromContext` formatted it
+  correctly. `fiberadapter.Tf` formats. **If you worked around this by
+  pre-formatting the string yourself, remove the workaround.**
+- **`CookieSameSite` is interpreted identically everywhere.** Previously each
+  middleware read the string itself, so `"strict"` meant `Strict` on Fiber and
+  `Lax` on net/http, and net/http emitted `SameSite=None` *without* `Secure` —
+  a combination browsers reject, so that cookie was never stored. Matching is
+  now case-insensitive, `"disabled"` omits the attribute, and `"None"` forces
+  `Secure`. **If you relied on a lowercase value quietly meaning `Lax`, spell
+  out what you want.**
 
 ## Upgrade Notes (v2.2.0)
 
