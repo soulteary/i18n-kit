@@ -70,12 +70,12 @@ A lightweight, flexible internationalization (i18n) library for Go applications.
 - **Multiple Language Support**: Built-in support for 10+ languages (EN, ZH, FR, DE, JA, KO, IT, ES, PT, RU)
 - **Language Detection**: Automatic detection from query parameters, cookies, headers, and Accept-Language
 - **Translation Bundles**: Thread-safe translation management with fallback support
-- **Dual Framework Support**: Middleware for both Fiber and net/http
+- **Framework-Agnostic**: net/http middleware built in, Fiber v3 in a subpackage, and any other framework in ~20 lines — detection runs against a three-method interface
+- **Pay Only For What You Import**: the root package pulls in one non-stdlib dependency (`gopkg.in/yaml.v3`); Fiber and fasthttp are linked only if you import `fiberadapter`
 - **Context Integration**: Store and retrieve language from context
 - **Named Parameters**: Support for `{name}` style parameter substitution
 - **Pluralization**: Simple plural form handling
 - **File Loading**: Load translations from JSON or YAML files
-- **Zero Dependencies**: Only depends on Fiber for middleware (optional)
 
 ## Requirements
 

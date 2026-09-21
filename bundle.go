@@ -100,6 +100,13 @@ func (b *Bundle) LookupTranslation(lang Language, key string) (string, bool) {
 	return key, false
 }
 
+// GetTranslation returns the translation of key in lang, falling back to the
+// bundle's fallback language and then to key itself when neither has it.
+//
+// Because a missing key comes back as the key, the result is indistinguishable
+// from a translation that happens to equal its key. Use [Bundle.LookupTranslation]
+// when you need to tell those apart -- which is what the Tf family does, so
+// that a missing key is never used as a printf format string.
 func (b *Bundle) GetTranslation(lang Language, key string) string {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
