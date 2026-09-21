@@ -1,6 +1,7 @@
 package i18n
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -31,21 +32,27 @@ func (f *Formatter) Format(lang Language, key string, params map[string]interfac
 	return substituteParams(translation, params)
 }
 
-// FormatWithContext returns the translated string using language from context.
-func (f *Formatter) FormatWithContext(ctx interface{}, key string, params map[string]interface{}) string {
-	// Type assertion for different context types
-	switch c := ctx.(type) {
-	case interface{ Context() interface{} }:
-		// Fiber context - check locals
-		if lang, ok := c.(interface {
-			Locals(key interface{}) interface{}
-		}); ok {
-			if l, ok := lang.Locals("i18n-language").(Language); ok {
-				return f.Format(l, key, params)
-			}
-		}
-	}
-	return f.Format(DefaultLanguage, key, params)
+// FormatWithContext returns the translated string for the language carried by
+// ctx, with the same named-parameter substitution as Format.
+//
+// The language comes from LanguageFromContext, so a context carrying none --
+// including a nil one -- formats in DefaultLanguage. The bundle is always the
+// formatter's own; a bundle stored with ContextWithBundle is not consulted,
+// because a Formatter is built around one bundle and Format uses it
+// unconditionally.
+//
+// The httpadapter middleware stores the detected language in the request
+// context, so r.Context() is what a net/http handler passes here. Fiber keeps
+// it in Locals rather than in a context: read it with fiberadapter.Language(c)
+// and call Format directly.
+//
+// Until v4.0.0 this took an interface{} and type-switched for a Fiber context.
+// Nothing satisfied that switch -- fiber.Ctx spells the method
+// Context() context.Context, not Context() interface{} -- so every call,
+// one passing a real context.Context included, quietly formatted in
+// DefaultLanguage.
+func (f *Formatter) FormatWithContext(ctx context.Context, key string, params map[string]interface{}) string {
+	return f.Format(LanguageFromContext(ctx), key, params)
 }
 
 // substituteParams replaces {name} placeholders with values from the map.

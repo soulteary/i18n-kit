@@ -1,6 +1,7 @@
 package i18n
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -182,4 +183,66 @@ func TestValidateParams(t *testing.T) {
 	// No params provided
 	missing = ValidateParams(template, nil)
 	assert.Len(t, missing, 3)
+}
+
+// TestFormatWithContextUsesContextLanguage pins the fix that v4.0.0 made to
+// FormatWithContext.
+//
+// It used to take an interface{} and type-switch on
+// `interface{ Context() interface{} }` to find a Fiber context. No type has
+// ever satisfied that -- fiber.Ctx declares Context() context.Context -- so
+// the switch matched nothing and every call fell through to DefaultLanguage,
+// a context.Context built by ContextWithLanguage included. The method had no
+// test, which is how it stayed that way.
+func TestFormatWithContextUsesContextLanguage(t *testing.T) {
+	bundle := NewBundle(LangEN)
+	bundle.AddTranslation(LangEN, "welcome", "Welcome, {name}!")
+	bundle.AddTranslation(LangZH, "welcome", "欢迎，{name}！")
+	formatter := NewFormatter(bundle)
+
+	params := map[string]interface{}{"name": "Alice"}
+
+	ctx := ContextWithLanguage(context.Background(), LangZH)
+	assert.Equal(t, "欢迎，Alice！", formatter.FormatWithContext(ctx, "welcome", params),
+		"a context carrying LangZH must format in Chinese, not DefaultLanguage")
+
+	ctx = ContextWithLanguage(context.Background(), LangEN)
+	assert.Equal(t, "Welcome, Alice!", formatter.FormatWithContext(ctx, "welcome", params))
+}
+
+// TestFormatWithContextFallsBackToDefaultLanguage covers the two cases that
+// legitimately have no language to read.
+func TestFormatWithContextFallsBackToDefaultLanguage(t *testing.T) {
+	bundle := NewBundle(LangEN)
+	bundle.AddTranslation(LangEN, "welcome", "Welcome, {name}!")
+	bundle.AddTranslation(LangZH, "welcome", "欢迎，{name}！")
+	formatter := NewFormatter(bundle)
+
+	params := map[string]interface{}{"name": "Alice"}
+
+	assert.Equal(t, "Welcome, Alice!", formatter.FormatWithContext(context.Background(), "welcome", params),
+		"a context with no language formats in DefaultLanguage")
+
+	// A nil context, held in a variable so staticcheck's SA1012 (which flags a
+	// literal nil) stays on for real call sites.
+	var nilCtx context.Context
+	assert.Equal(t, "Welcome, Alice!", formatter.FormatWithContext(nilCtx, "welcome", params),
+		"a nil context must not panic")
+}
+
+// TestFormatWithContextIgnoresContextBundle documents the deliberate limit: a
+// Formatter formats against the bundle it was built with, so a bundle stashed
+// with ContextWithBundle does not override it. TFromContextWithBundle is the
+// function that honours that.
+func TestFormatWithContextIgnoresContextBundle(t *testing.T) {
+	own := NewBundle(LangEN)
+	own.AddTranslation(LangEN, "welcome", "Welcome, {name}!")
+	formatter := NewFormatter(own)
+
+	other := NewBundle(LangEN)
+	other.AddTranslation(LangEN, "welcome", "Greetings, {name}!")
+
+	ctx := ContextWithBundle(context.Background(), other)
+	assert.Equal(t, "Welcome, Alice!",
+		formatter.FormatWithContext(ctx, "welcome", map[string]interface{}{"name": "Alice"}))
 }

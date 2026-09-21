@@ -71,6 +71,11 @@
 > `ResolveCookieSameSite`，以及所有格式化与复数函数都留在根包，签名与 v3 一致。
 > `fiberadapter` 只有 import 路径要改。
 >
+> **根包里确实有一个签名变了：** `Formatter.FormatWithContext` 现在接收
+> `context.Context`，不再是 `interface{}`。它从来就没能通过旧签名工作过 ——
+> 它用的类型分支匹配不到任何类型，于是每一次调用都按 `DefaultLanguage` 格式化
+> —— 详见升级说明第 5 步。
+>
 > → **[升级说明（v4.0.0）](#升级说明v400)**
 
 ## 特性
@@ -88,7 +93,7 @@
 ## 环境要求
 
 - **Go 1.27+**（`go.mod` 声明 `go 1.27.0`）
-- `github.com/gofiber/fiber/v3` v3.4.0+ —— 只有 `fiberadapter` 子包需要
+- `github.com/gofiber/fiber/v3` v3.5.0+ —— 只有 `fiberadapter` 子包需要
 - `gopkg.in/yaml.v3` —— 只有 `yamlloader` 子包需要
 - `httpadapter` 子包与根包只需要标准库
 
@@ -115,7 +120,7 @@ go get github.com/soulteary/i18n-kit/v4/yamlloader
 go get github.com/soulteary/i18n-kit/v4/fiberadapter
 ```
 
-Fiber 集成要求 Fiber v3.4.0 或更高版本。仍使用 Fiber v2 的应用应继续使用 `github.com/soulteary/i18n-kit` v1。
+Fiber 集成要求 Fiber v3.5.0 或更高版本 —— 也就是 `go.mod` 里要求的版本。仍使用 Fiber v2 的应用应继续使用 `github.com/soulteary/i18n-kit` v1。
 
 ## 快速开始
 
@@ -284,16 +289,45 @@ bundle.AddTranslations(i18n.LangFR, map[string]string{
 ### 从文件加载
 
 ```go
-// 从 JSON 加载
+// JSON —— 只用标准库，不引入额外依赖
 bundle.LoadJSONFile(i18n.LangEN, "locales/en.json")
+bundle.LoadJSON(i18n.LangEN, data)   // 从字节加载：embed.FS、HTTP 响应体等
 
-// 从 YAML 加载
+// YAML —— 会链接 gopkg.in/yaml.v3，因此放在 yamlloader 子包里
 yamlloader.LoadFile(bundle, i18n.LangZH, "locales/zh.yaml")
+yamlloader.Load(bundle, i18n.LangZH, data)
 
-// 加载整个目录
-// 文件命名: en.json, zh.yaml, fr.json 等
-bundle.LoadDirectory("locales/")
+// 加载整个目录，文件命名为 en.json、zh.yaml、fr.json ……
+bundle.LoadDirectory("locales/")               // 只读 .json
+yamlloader.LoadDirectory(bundle, "locales/")   // .json、.yaml 和 .yml
 ```
+
+`Bundle.LoadDirectory` **只读 `.json`**。目录里出现 `.yaml` 或 `.yml` 时，它会返回
+一个点名 `yamlloader.LoadDirectory` 的错误，而不是默默只加载一半翻译。
+`yamlloader.LoadDirectory` 仍然包含 `.json`，所以把其中一个文件改名成 `.yaml`
+不会让其余文件停止加载。
+
+#### 让加载器认识其他格式
+
+`Decoder` 负责把单个文件的字节解析成一个扁平 map —— 根包正是靠它加载那些自己
+并不链接解析器的格式：
+
+```go
+type Decoder func(data []byte) (map[string]string, error)
+```
+
+`LoadDirectoryWith` 接收它应当认识的扩展名：
+
+```go
+bundle.LoadDirectoryWith("locales/", map[string]i18n.Decoder{
+    ".json": i18n.DecodeJSON,   // LoadDirectory 用的就是它
+    ".yaml": yamlloader.Decode, // yamlloader.LoadDirectory 额外加的就是它
+    ".toml": myTOMLDecoder,     // 其他格式同理，三行就够
+})
+```
+
+`yamlloader.LoadDirectory` 支持 YAML 而根包始终不 import YAML 解析器，用的正是
+这个机制 —— 同一个接缝也对你自己的格式开放。
 
 ### 管理翻译包
 
@@ -322,6 +356,35 @@ lang := i18n.GetGlobalLanguage()
 ```
 
 在服务端请优先使用请求级和上下文级的变体；全局变量是被所有并发请求共享的单一值。
+
+`i18n.TWithLang` / `i18n.TfWithLang` 在每次调用时指定语言，完全不读全局值，这是
+规避这种共享最简单的办法：
+
+```go
+i18n.TWithLang(i18n.LangZH, "greeting")              // "你好，世界！"
+i18n.TfWithLang(i18n.LangZH, "greeting", "Alice")
+```
+
+### 作用域内的 Translator
+
+`Translator` 把一个 bundle 和一个当前语言绑定在一起，不与进程中其他部分共享任何状态：
+
+```go
+translator := i18n.NewTranslator(bundle)                           // 从 DefaultLanguage 开始
+translator = i18n.NewTranslatorWithLanguage(bundle, i18n.LangZH)   // 也可以指定起始语言
+
+translator.SetLanguage(i18n.LangFR)
+translator.GetLanguage()                        // "fr"
+translator.Bundle()                             // 构造时传入的那个 bundle
+
+translator.T("greeting")                        // 使用 translator 自己的语言
+translator.Tf("greeting", "Alice")
+translator.TWithLang(i18n.LangZH, "greeting")   // 单次调用覆盖语言
+translator.TfWithLang(i18n.LangZH, "greeting", "Alice")
+```
+
+`i18n.GlobalTranslator` 就是 `T`/`Tf` 背后那个包级 translator。它是共享值，所以
+请优先使用你自己的 translator，或下文的上下文 helper，而不是去修改它。
 
 ### 翻译回退
 
@@ -357,6 +420,10 @@ result := formatter.Format(i18n.LangEN, "welcome", map[string]any{
 // 也可以用包级函数，作用于 DefaultBundle
 result = i18n.Format(i18n.LangEN, "welcome", map[string]any{"name": "Alice", "count": 5})
 ```
+
+`i18n.Format` 和 `i18n.Pluralize` 只是 `i18n.DefaultFormatter` 的薄封装 —— 后者
+是构建在 `DefaultBundle` 之上的 `*Formatter`。只要用的不是进程级的那套翻译，就用
+`NewFormatter` 自己造一个。
 
 替换过程是**对模板的单次遍历**，由此得到两个可以依赖的保证：
 
@@ -458,9 +525,40 @@ key 按 `<key>.zero`、`.one`、`.few`、`.many`、`.other` 查找，与
 ctx := i18n.ContextWithLanguage(context.Background(), i18n.LangZH)
 
 // 后续代码中
-lang := i18n.LanguageFromContext(ctx)
+lang := i18n.LanguageFromContext(ctx)          // 没有时返回 DefaultLanguage
+lang, ok := i18n.LanguageFromContextOK(ctx)    // 没有时返回 ("", false)
 translation := i18n.TFromContext(ctx, "greeting")
+formatted := i18n.TfFromContext(ctx, "greeting", "Alice")
 ```
+
+当你需要把「这个 context 里没有语言」和「语言就是默认值」区分开时，用
+`LanguageFromContextOK` —— `LanguageFromContext` 会把两者混为一谈。
+
+### 在上下文中携带 Bundle
+
+上下文除了语言，还能携带一个 bundle —— 多租户、每个租户一套翻译的服务正需要这个：
+
+```go
+ctx = i18n.ContextWithBundle(ctx, tenantBundle)
+
+bundle := i18n.BundleFromContext(ctx)                  // 没有时返回 DefaultBundle
+text := i18n.TFromContextWithBundle(ctx, "greeting")
+text = i18n.TfFromContextWithBundle(ctx, "greeting", "Alice")
+```
+
+带 `WithBundle` 的变体从上下文里取 bundle；而普通的 `TFromContext` /
+`TfFromContext` 始终使用 `DefaultBundle`。`httpadapter` 的中间件两个值都会写入，
+所以 handler 里的 `r.Context()` 会带上配置指定的那个 bundle。
+
+`Formatter` 同样可以从上下文解析语言：
+
+```go
+formatter.FormatWithContext(r.Context(), "welcome", map[string]any{"name": "Alice"})
+```
+
+它使用的始终是 formatter **自己的** bundle —— `ContextWithBundle` 不会覆盖它；
+上下文里没有语言时回退到 `DefaultLanguage`。Fiber 把语言放在 `Locals` 而不是
+context 里：用 `fiberadapter.Language(c)` 取出来再直接调用 `Format`。
 
 ### 使用 http.Request
 
@@ -513,6 +611,23 @@ app.Use(fiberadapter.Middleware(config))
 
 匹配不区分大小写，首尾空白会被忽略。`"None"` 之所以强制 `Secure`，是因为浏览器
 拒收不带 `Secure` 的该组合 —— 那个 cookie 根本不会被存下来。
+
+`ResolveCookieSameSite` 返回一个 `i18n.CookieSameSiteMode` —— `SameSiteLax`、
+`SameSiteStrict`、`SameSiteNone`、`SameSiteDisabled` 四者之一；`mode.RequiresSecure()`
+则报告适配器必须照办的 `SameSiteNone` 这一种情况。`httpadapter.SameSite(mode)`
+负责把它转成 net/http 需要的 `http.SameSite` 常量：
+
+```go
+mode := i18n.ResolveCookieSameSite(cfg.CookieSameSite)   // i18n.SameSiteLax
+if mode.RequiresSecure() {
+    cookie.Secure = true
+}
+sameSite, write := httpadapter.SameSite(mode)            // "disabled" 时 write 为 false
+```
+
+`i18n.DefaultMiddlewareConfig()` 返回这些字段回退到的默认值；而
+`i18n.ResolveMiddlewareConfig(cfg...)` 是每个适配器用来处理调用方配置的入口 ——
+自己适配框架时请用它，好让默认值只有一处定义。
 
 ### 跳过特定路径
 
@@ -674,7 +789,12 @@ lang := i18n.NormalizeLanguage("en-US")        // "en"
 lang, ok := i18n.ParseLanguage("zh-Hans")      // ("zh", true)
 i18n.LangEN.IsValid()                          // true
 i18n.LangEN.String()                           // "en"
+
+i18n.SupportedLanguages                        // 上表这些内置语言的 []Language
 ```
+
+`SupportedLanguages` 就是 `IsValid` 用来比对的那个切片，`RegisterLanguage` 会往里
+追加 —— 要做语言切换器就遍历它，不必把上面那张表硬编码一遍。
 
 ### 添加自定义语言
 
@@ -744,12 +864,41 @@ i18n.AddLanguageAlias("ar-EG", i18n.Language("ar"))
    传进来 —— `yamlloader.LoadDirectory` 就是这样在不让根包 import YAML 库的前提下
    加上 YAML 的。想要 TOML 或 `.properties` 的话，二十行，这边一行都不用改。
 
-5. **net/http 和 YAML 都不用的话，第 2 到 4 步都不适用。** Bundle、`Translator`、
-   `Detector`、`RequestSource`、context helper、`MiddlewareConfig`、
-   `ResolveMiddlewareConfig`、`ResolveCookieSameSite`，以及所有格式化与复数函数，
-   签名都与 v3 一致地留在根包。`fiberadapter` 的用户只有 import 路径要改。
+5. **`Formatter.FormatWithContext` 现在接收 `context.Context`。** 这一条是修复，
+   无论你用不用 net/http 或 YAML 都适用：
 
-除此之外没有任何变化：检测规则、Cookie 属性、格式化行为、翻译输出都一样。
+   ```diff
+   -func (f *Formatter) FormatWithContext(ctx interface{}, key string, params map[string]interface{}) string
+   +func (f *Formatter) FormatWithContext(ctx context.Context, key string, params map[string]interface{}) string
+   ```
+
+   它过去接收 `interface{}`，并用 `interface{ Context() interface{} }` 这个类型
+   分支去识别 Fiber 的 context。**从来没有任何类型满足过这个分支** —— `fiber.Ctx`
+   声明的是 `Context() context.Context`，不是 `Context() interface{}` —— 所以每一次
+   调用都落到了 `DefaultLanguage`，连传入由 `ContextWithLanguage` 构造的真正
+   `context.Context` 也一样。这个方法自己没有测试，这正是它一直没被发现的原因。
+   现在它通过 `LanguageFromContext` 解析语言：
+
+   ```go
+   // net/http —— 中间件会把语言写进请求的 context
+   formatter.FormatWithContext(r.Context(), "welcome", params)
+
+   // Fiber —— 语言在 Locals 里，不在 context 里
+   formatter.Format(fiberadapter.Language(c), "welcome", params)
+   ```
+
+   原本就传 `context.Context` 的代码照常编译，并且开始真正拿到 context 里的语言，
+   而不是永远拿默认值。传其他东西则会编译报错 —— 这正是目的所在，因为它以前只会
+   悄悄给出错误答案。
+
+6. **net/http 和 YAML 都不用的话，第 2 到 4 步都不适用。** Bundle、`Translator`、
+   `Detector`、`RequestSource`、context helper、`MiddlewareConfig`、
+   `ResolveMiddlewareConfig`、`ResolveCookieSameSite`，以及除 `FormatWithContext`
+   之外的所有格式化与复数函数，签名都与 v3 一致地留在根包。`fiberadapter` 的用户
+   只有 import 路径要改。
+
+除此之外没有任何变化：检测规则、Cookie 属性、翻译输出都一样；格式化行为除上面那处
+`FormatWithContext` 的修复外也没有变动。
 
 ## 升级说明（v3.0.0）
 
