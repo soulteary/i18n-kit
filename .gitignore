@@ -31,3 +31,6 @@ Thumbs.db
 
 # Debug
 __debug_bin*
+
+# Raw Go report evidence is uploaded as artifacts, not committed.
+.github/test-results/

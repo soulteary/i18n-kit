@@ -1,10 +1,6 @@
 # i18n-kit
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit/v4.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit/v4)
-[![Go Report Card](.github/goreportcard.svg)](.github/goreportcard-report.md)
-[![CI](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml)
-[![Coverage](https://codecov.io/gh/soulteary/i18n-kit/branch/main/graph/badge.svg)](https://codecov.io/gh/soulteary/i18n-kit)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Go Reference](https://pkg.go.dev/badge/github.com/soulteary/i18n-kit/v4.svg)](https://pkg.go.dev/github.com/soulteary/i18n-kit/v4) [![CI](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/soulteary/i18n-kit/actions/workflows/ci.yml) [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE) [![Go Test Coverage](./.github/coverage.svg)](./.github/go-test-report.md) [![Go Report Card](./.github/goreportcard.svg)](./.github/goreportcard-report.md)
 
 一个轻量级、灵活的 Go 国际化 (i18n) 库。支持从 HTTP 请求自动检测语言、翻译包管理，以及 Fiber 和 net/http 双框架中间件。
 
