@@ -1,22 +1,22 @@
 # Go Report Card
 
-**Grade: A+** (100.0%)
+**Grade: B** (76.5%)
 
 | Metric | Value |
 | ------ | ----- |
-| Files | 22 |
+| Files | 31 |
 | Issues | 0 |
 
 ## Checks
 
 | Check | Score |
 | ----- | ----- |
-| go_vet | 100% |
 | gofmt | 100% |
-| gocyclo | 100% |
-| ineffassign | 100% |
+| go_vet | 100% |
+| ineffassign | 0% |
+| gocyclo | 0% |
 | license | 100% |
-| misspell | 100% |
+| misspell | 0% |
 
 No issues found. Nice work!
 
