@@ -88,7 +88,7 @@
 
 ## 环境要求
 
-- **Go 1.27+**（`go.mod` 声明 `go 1.27.2`）
+- **Go 1.27.2+**（`go.mod` 声明 `go 1.27.2`）
 - `github.com/gofiber/fiber/v3` v3.5.0+ —— 只有 `fiberadapter` 子包需要
 - `go.yaml.in/yaml/v3` —— 只有 `yamlloader` 子包需要
 - `httpadapter` 子包与根包只需要标准库
