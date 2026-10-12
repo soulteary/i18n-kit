@@ -96,7 +96,7 @@ A lightweight, flexible internationalization (i18n) library for Go applications.
 
 ## Requirements
 
-- **Go 1.27+** (`go.mod` declares `go 1.27.2`)
+- **Go 1.27.2+** (`go.mod` declares `go 1.27.2`)
 - `github.com/gofiber/fiber/v3` v3.5.0+ — only for the `fiberadapter` subpackage
 - `go.yaml.in/yaml/v3` — only for the `yamlloader` subpackage
 - the `httpadapter` subpackage and the root package need nothing but the standard library
